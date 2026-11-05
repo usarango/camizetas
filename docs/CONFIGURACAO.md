@@ -6,6 +6,10 @@ O banco deve ser um projeto Supabase exclusivo da Camizetas, em organização Fr
 
 O projeto informado é `hbajyggnlsijqrwhsedn`. A conexão administrativa precisa estar autorizada para a organização desse projeto. Um link de projeto não concede acesso por si só.
 
+A URL e a chave publicável do projeto já estão configuradas em `.openai/app-public.json`. A API pública foi consultada: Auth está habilitado e `public.stores` ainda não está disponível.
+
+Para preparar um projeto novo sem depender da conexão administrativa desta conversa, abra o [SQL Editor](https://supabase.com/dashboard/project/hbajyggnlsijqrwhsedn/sql/new), cole todo o conteúdo de [`database/setup.sql`](../database/setup.sql) e execute. Esse arquivo reúne as duas migrações em uma transação, sem apagar dados. Execute uma única vez; tabelas com os mesmos nomes fazem a operação ser revertida.
+
 Antes de aplicar mudanças, listar as tabelas do projeto e confirmar que não há outro aplicativo usando o schema. Aplicar as migrações em ordem:
 
 1. `*_camizetas_commerce.sql`: lojas, produtos, variantes, pedidos, histórico, RLS e RPCs.

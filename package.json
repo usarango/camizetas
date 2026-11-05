@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test --test-isolation=none tests/*.test.mjs",
-    "check": "node --check src/data.js && node --check src/painel.js && node --check src/storefront.js && node --check src/shops.js"
+    "check": "node --check src/data.js && node --check src/painel.js && node --check src/storefront.js && node --check src/shops.js",
+    "db:prepare": "node scripts/prepare-database.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.119.0"

@@ -16,6 +16,7 @@ const errorMessages={
  'NetworkError when attempting to fetch resource.':'Falha de conexão. Tente novamente.'
 };
 function check(result){if(result.error){const source=result.error;let msg=errorMessages[source.message]||source.message;
+ if(['PGRST205','PGRST202','42P01'].includes(source.code))msg='A configuração da Camizetas ainda está sendo concluída. Tente novamente em instantes.';
  if(source.code==='23505')msg='Este endereço de loja ou SKU já está em uso. Escolha outro.';
  if(source.code==='42501')msg='Você não tem acesso a esta operação. Entre com a conta responsável pela loja.';
  if(/insufficient stock|stock would become negative|not enough stock/i.test(msg))msg='Estoque insuficiente. Atualize o carrinho ou informe outra quantidade.';
