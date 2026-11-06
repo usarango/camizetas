@@ -3,13 +3,13 @@ import { test, before, after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
-let db, setup, schema, storage, design;
+let db, setup, schema, storage, design, collections;
 const userId='40000000-0000-4000-8000-000000000001';
 const stripTransaction = sql => sql.replace(/^\s*(?:begin|commit);\s*$/gmi,'').trim();
 const normalize = sql => sql.replace(/\s+/g,' ').trim();
 
 before(async()=>{
-  [setup,schema,storage,design]=await Promise.all(['setup.sql','schema.sql','storage.sql','design.sql'].map(file=>readFile(new URL(`../database/${file}`,import.meta.url),'utf8')));
+  [setup,schema,storage,design,collections]=await Promise.all(['setup.sql','schema.sql','storage.sql','design.sql','collections.sql'].map(file=>readFile(new URL(`../database/${file}`,import.meta.url),'utf8')));
   db=new PGlite();
   await db.waitReady;
   await db.exec(`
@@ -40,21 +40,26 @@ test('one-shot setup contains all tested source scripts, one transaction and sch
   assert.ok(text.includes(normalize(stripTransaction(schema))), 'commerce source differs from setup.sql');
   assert.ok(text.includes(normalize(stripTransaction(storage))), 'storage source differs from setup.sql');
   assert.ok(text.includes(normalize(stripTransaction(design))), 'design source differs from setup.sql');
+  assert.ok(text.includes(normalize(stripTransaction(collections))), 'collections source differs from setup.sql');
   assert.equal((setup.match(/^\s*begin;\s*$/gmi)||[]).length,1);
   assert.equal((setup.match(/^\s*commit;\s*$/gmi)||[]).length,1);
   assert.match(setup,/notify\s+pgrst,\s*'reload schema';/i);
   const statementsWithoutComments=setup.replace(/--[^\n]*/g,'');
-  assert.doesNotMatch(statementsWithoutComments,/\b(?:drop\s+(?:table|schema|function|policy)|truncate\b|delete\s+from\b)/i);
+  // Function bodies are defined, not executed, during setup. The collection RPC
+  // intentionally replaces only its own membership rows; that operation has dedicated RLS tests.
+  const setupStatements=statementsWithoutComments.replace(/create(?:\s+or\s+replace)?\s+function\b[\s\S]*?\$\$[\s\S]*?\$\$\s*;/gi,'');
+  assert.doesNotMatch(setupStatements,/\b(?:drop\s+(?:table|schema|function|policy)|truncate\b|delete\s+from\b)/i);
+  assert.doesNotMatch(statementsWithoutComments,/\b(?:drop\s+(?:table|schema)|truncate\b)/i);
   assert.doesNotMatch(statementsWithoutComments,/alter\s+table\s+storage\./i);
 });
 
 test('combined setup executes against actual PostgreSQL with Supabase auth/storage stubs',async()=>{
   await db.exec(setup);
   const tables=(await db.query("select relname,relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' order by relname")).rows;
-  assert.equal(tables.length,8);
+  assert.equal(tables.length,10);
   assert.ok(tables.every(t=>t.relrowsecurity));
   const functions=(await db.query("select proname,prosecdef from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' order by proname")).rows;
-  assert.deepEqual(functions.map(f=>f.proname),['adjust_stock','create_store','place_order','save_product','save_store_design_draft','transition_order']);
+  assert.deepEqual(functions.map(f=>f.proname),['adjust_stock','create_store','place_order','save_collection','save_product','save_store_design_draft','transition_order']);
   assert.ok(functions.every(f=>!f.prosecdef));
   const bucket=(await db.query("select public,file_size_limit,allowed_mime_types from storage.buckets where id='camizetas-products'")).rows[0];
   assert.deepEqual(bucket,{public:true,file_size_limit:5242880,allowed_mime_types:['image/jpeg','image/png','image/webp']});

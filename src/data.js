@@ -28,6 +28,7 @@ async function user(){unavailable();const {data:sessionData,error}=await client.
 async function requireUser(){const u=await user();if(!u)throw new Error('Entre na sua conta para continuar.');return u}
 async function rpc(name,args){unavailable();return check(await client.rpc(name,args))}
 const storeFields=['name','slug','description','template','accent','background','headline','published','design'];
+function collectionWithProducts(row){return {...row,product_ids:Array.isArray(row.product_ids)?row.product_ids:[...(row.items||[])].sort((a,b)=>a.sort_order-b.sort_order).map(item=>item.product_id)}}
 export const api={
  ready:configured,
  async authUser(){if(!client)return null;return user()},
@@ -53,6 +54,11 @@ export const api={
  async getOrders(storeId){await requireUser();return check(await client.from('orders').select('*,items:order_items(*),events:order_events(*)').eq('store_id',storeId).order('created_at',{ascending:false}).limit(500))},
  async transitionOrder(id,status,trackingCode=null){return rpc('transition_order',{p_order_id:id,p_status:status,p_tracking_code:trackingCode||null})},
  async getInventoryMovements(storeId){await requireUser();const rows=check(await client.from('inventory_movements').select('*,variant:variants(sku,size,color,product:products(name))').eq('store_id',storeId).order('created_at',{ascending:false}).limit(200));return rows.map(r=>({...r,delta:r.quantity,quantity_delta:r.quantity,sku:r.variant?.sku,product_name:r.variant?.product?.name,variant_name:[r.variant?.size,r.variant?.color].filter(Boolean).join(' / ')}))},
+
+ async getCollections(storeId){await requireUser();const result=await client.from('collections').select('*,items:collection_products(product_id,sort_order)').eq('store_id',storeId).order('sort_order',{ascending:true}).order('created_at',{ascending:true});if(result.error&&['PGRST205','PGRST204','42P01','42703'].includes(result.error.code))return {available:false,collections:[]};return {available:true,collections:check(result).map(collectionWithProducts)}},
+ async saveCollection(storeId,collection,productIds){await requireUser();if(!Array.isArray(productIds)||productIds.length>500)throw new Error('Selecione até 500 produtos para a coleção.');try{return await rpc('save_collection',{p_store_id:storeId,p_collection:collection,p_product_ids:productIds})}catch(error){if(error.code==='23505')error.message='Este endereço já está em uso por outra coleção desta loja. Escolha outro.';throw error}},
+ async getPublicCollections(storeId){unavailable();const result=await client.from('collections').select('id,store_id,name,slug,description,image_url,active,featured,sort_order').eq('store_id',storeId).eq('active',true).order('sort_order',{ascending:true}).order('created_at',{ascending:true});if(result.error&&['PGRST205','PGRST204','42P01','42703'].includes(result.error.code))return [];return check(result)},
+ async getPublicCollection(storeId,slug){unavailable();const result=await client.from('collections').select('*,items:collection_products(product_id,sort_order)').eq('store_id',storeId).eq('slug',slug).eq('active',true).maybeSingle();if(result.error&&['PGRST205','PGRST204','42P01','42703'].includes(result.error.code))return null;const row=check(result);return row?collectionWithProducts(row):null},
  async getPublicStores(){unavailable();return check(await client.from('stores').select('*').eq('published',true).order('created_at',{ascending:false}).limit(100))},
  async getPublicStore(slug){unavailable();return check(await client.from('stores').select('*').eq('slug',slug).eq('published',true).maybeSingle())},
  async getPublicProducts(storeId){unavailable();const rows=check(await client.from('products').select('*,variants(*)').eq('store_id',storeId).eq('active',true).order('created_at',{ascending:false}));return rows.map(p=>({...p,variants:p.variants.filter(v=>v.active)}))},

@@ -1,6 +1,7 @@
 // The same, deliberately small design vocabulary is used by the editor and the store.
 const SECTION_DEFAULTS = [
   {id: 'hero', visible: true},
+  {id: 'collections', visible: true},
   {id: 'products', visible: true},
   {id: 'about', visible: false},
 ];
@@ -134,7 +135,11 @@ export function normalizeDesign(raw, store = {}) {
     }
   }
   for (const section of SECTION_DEFAULTS) {
-    if (!sectionIds.has(section.id)) normalized.sections.push({...section});
+    if (sectionIds.has(section.id)) continue;
+    // A saved three-section design keeps its order; the new section joins just before its catalog.
+    const catalogIndex = section.id === 'collections' ? normalized.sections.findIndex(item => item.id === 'products') : -1;
+    if (catalogIndex >= 0) normalized.sections.splice(catalogIndex, 0, {...section});
+    else normalized.sections.push({...section});
   }
   return normalized;
 }

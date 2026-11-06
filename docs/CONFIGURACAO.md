@@ -61,3 +61,11 @@ O gateway de pagamentos, cálculo de frete e geração de fotos por IA não est�
 Para lojas já existentes, execute somente [`database/design.sql`](../database/design.sql) no SQL Editor. A atualização adiciona o design publicado e rascunhos privados, preservando produtos, pedidos, estoque e os quatro valores legados de `template`. Os novos presets são guardados no JSON de design. Esse arquivo pode ser executado novamente sem apagar estilos ou rascunhos.
 
 No painel, abra **Espaço criativo**. Escolha um dos oito pontos de partida, ajuste marca, fontes, capa, paleta e seções. As mudanças de rascunho são salvas na conta e no navegador. **Aplicar na loja** atualiza o visual público em uma operação; uma loja em rascunho continua em rascunho. Visitantes e outros lojistas não recebem acesso ao editor da sua loja.
+
+## Atualização de coleções
+
+Execute somente [`database/collections.sql`](../database/collections.sql) no SQL Editor do projeto Camizetas. O script adiciona coleções e vínculos com produtos, com permissões por loja e sem modificar o estoque ou os pedidos. Pode ser executado novamente sem apagar dados.
+
+Em **Painel → Coleções**, defina nome, endereço, descrição, capa e produtos. Marque publicação e, se quiser, destaque na vitrine; a loja também precisa estar publicada. Coleções não destacadas continuam acessíveis pelo filtro da loja e por seu link individual. Em **Espaço criativo → Seções**, escolha se a área de destaque aparece e sua posição.
+
+A mesma peça pode participar de mais de uma coleção; estoque e preço continuam no produto original. Publicar, despublicar e reorganizar coleções não cria movimentações de estoque.

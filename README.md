@@ -9,6 +9,7 @@ Plataforma de lojas independentes de roupas e acessórios, com vitrine pública,
 - Cores, fontes, capa e logo, avisos, cartões, grade e ordem das seções, com prévia do catálogo real em celular/computador.
 - Rascunhos privados na conta, recuperação local, desfazer/refazer e aplicação explícita do visual publicado.
 - Catálogo de produtos, preço em centavos, fotos e variantes por tamanho/cor/SKU.
+- Coleções com capa, descrição e página própria; produtos podem estar em várias coleções. Publicação e destaque na vitrine são escolhas independentes.
 - Estoque por variante e ajustes com motivo, autor e histórico.
 - Loja pública com catálogo real, sacola e envio de pedido com endereço de entrega.
 - Fila: Novo → Confirmado → Em separação → Enviado → Concluído. Cancelamento antes do envio restaura o estoque uma vez.
@@ -69,3 +70,9 @@ O fluxo operacional se inspira no Rango, com adaptação para peças, tamanhos e
 Abra **Painel → Espaço criativo**, ou **Personalizar minha loja** na vitrine enquanto estiver conectado como proprietário. As alterações viram rascunhos privados; somente **Aplicar na loja** atualiza o que os clientes veem. O estado de publicação da loja é mantido. O editor também está disponível como demonstração na landing, com importação explícita do rascunho após criar a loja.
 
 Projetos já existentes devem aplicar somente `database/design.sql` para habilitar o novo campo e os rascunhos. `database/setup.sql` já inclui essa atualização para projetos novos. Veja [a configuração](docs/CONFIGURACAO.md).
+
+## Coleções
+
+Abra **Painel → Coleções**, crie a coleção, escolha sua capa e selecione os produtos. Uma coleção começa em rascunho. Marque **Publicar coleção** para disponibilizar seu link e **Destacar na vitrine** para exibir o cartão na página inicial da loja. O cliente pode navegar também pelo filtro de coleções. No Espaço criativo, é possível mostrar, ocultar e reposicionar a seção de destaques.
+
+Para atualizar um banco existente, execute somente `database/collections.sql`. Essa atualização preserva produtos, estoque e pedidos. Uma coleção pode ser despublicada sem remover seus produtos.

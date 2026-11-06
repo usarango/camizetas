@@ -105,6 +105,7 @@ export class StoreCustomizer extends HTMLElement {
     this._config={cloudReady:true,demo:false,products:[],...configuration};
     this._store=clone(configuration.store || {});
     this._products=Array.isArray(configuration.products)?clone(configuration.products.filter(product=>product&&typeof product==='object'&&product.active!==false)):[];
+    this._collections=Array.isArray(configuration.collections)?clone(configuration.collections.filter(collection=>collection&&typeof collection==='object'&&collection.active!==false)):[];
     this._key=this._config.demo?DEMO_KEY:`${LOCAL_PREFIX}${String(configuration.userId||'anonymous')}:${String(this._store.id||'new')}`;
     const live={version:1,brand:cleanBrand({},this._store),design:resolveDesign(this._store),updatedAt:new Date().toISOString()};
     this._state=normalizePayload(configuration.draft,this._store) || live;
@@ -260,6 +261,9 @@ export class StoreCustomizer extends HTMLElement {
     if(this._activeTab==='brand') target.innerHTML=`<div class="cz-control-intro"><span class="cz-step">02 / SUA IDENTIDADE</span><h3>Uma loja com a sua voz.</h3><p>Apresente sua marca com palavras e imagens que façam sentido para você.</p></div>${this._field('Nome da loja','brand.name',brand.name,{max:80,placeholder:'Como sua marca se chama?',id:'cz-brand-name'})}${this._field('Frase de abertura','brand.headline',brand.headline,{max:100,placeholder:'Uma frase que traduza sua marca.',id:'cz-brand-headline',area:true})}${this._field('Sobre a marca','brand.description',brand.description,{max:3000,placeholder:'Conte um pouco da sua história.',area:true,rows:4})}<div class="cz-control-divider"></div>${this._mediaControl('logo','Logo da marca','Sua assinatura no topo da loja.',design.logoUrl)}${this._mediaControl('hero','Imagem de capa','A primeira impressão da sua coleção.',design.heroImage)}`;
     if(this._activeTab==='visual') target.innerHTML=`<div class="cz-control-intro"><span class="cz-step">03 / OS DETALHES FAZEM A MARCA</span><h3>Encontre seu tom.</h3><p>Combine cores e formas. A prévia acompanha cada escolha.</p></div><fieldset class="cz-control-group"><legend>Cores da loja</legend><div class="cz-palettes">${palettes.map((palette,index)=>`<button type="button" class="cz-palette ${design.accent.toLowerCase()===palette.accent.toLowerCase()&&design.background.toLowerCase()===palette.background.toLowerCase()?'is-selected':''}" data-palette="${index}" aria-label="Paleta ${palette.label}" title="${palette.label}" aria-pressed="${design.accent.toLowerCase()===palette.accent.toLowerCase()&&design.background.toLowerCase()===palette.background.toLowerCase()}"><i style="background:${palette.background}"></i><i style="background:${palette.accent}"></i></button>`).join('')}</div><div class="cz-colors">${this._colorControl('Cor de destaque','accent',design.accent)}${this._colorControl('Cor de fundo','background',design.background)}</div></fieldset><fieldset class="cz-control-group"><legend>Tipografia</legend><div class="cz-fonts">${fonts.map(font=>`<button type="button" data-font="${font.id}" class="cz-font ${design.font===font.id?'is-selected':''}" aria-pressed="${design.font===font.id}"><span>${font.label}</span><strong style="font-family:${esc(font.family)}">${font.sample}</strong>${design.font===font.id?icon('check'):''}</button>`).join('')}</div></fieldset><fieldset class="cz-control-group"><legend>Composição da abertura</legend><div class="cz-layouts">${heroLayouts.map(layout=>`<button type="button" class="cz-layout ${design.hero===layout.id?'is-selected':''}" data-hero="${layout.id}" aria-pressed="${design.hero===layout.id}"><span class="cz-layout-illustration layout-${layout.id}" aria-hidden="true"><i></i><b></b></span><span>${layout.label}</span></button>`).join('')}</div></fieldset>${this._field('Texto do botão da abertura','design.buttonLabel',design.buttonLabel,{max:60,placeholder:'Explorar coleção'})}<fieldset class="cz-control-group"><legend>Catálogo</legend>${this._segmented('Peças por linha','gridColumns',[['2','2'],['3','3'],['4','4']],String(design.gridColumns))}${this._segmented('Estilo dos produtos','cardStyle',[['clean','Leve'],['outlined','Contorno'],['soft','Suave']],design.cardStyle)}${this._segmented('Cantos','radius',[['0','Retos'],['8','Suaves'],['20','Redondos']],String(design.radius))}</fieldset>`;
     if(this._activeTab==='sections') target.innerHTML=`<div class="cz-control-intro"><span class="cz-step">04 / A SUA NARRATIVA</span><h3>Cada parte no seu lugar.</h3><p>Organize o caminho de quem chega. Use as setas para mudar a ordem das seções.</p></div><fieldset class="cz-control-group"><legend>Faixa de anúncio</legend><label class="cz-toggle-row"><span>Mostrar anúncio no topo</span><input type="checkbox" data-bind="design.announcementEnabled" ${design.announcementEnabled?'checked':''}><span class="cz-toggle" aria-hidden="true"></span></label>${this._field('Mensagem do anúncio','design.announcement',design.announcement,{max:160,placeholder:'Ex.: Envio para todo o Brasil',disabled:!design.announcementEnabled})}</fieldset><div class="cz-control-divider"></div><div class="cz-section-list">${design.sections.map((section,index)=>this._sectionControl(section,index,design.sections.length)).join('')}</div><p class="cz-help">O catálogo fica sempre visível para seus clientes encontrarem as peças.</p>`;
+    if(this._activeTab==='sections'&&!this._collections.some(collection=>collection.featured===true)) {
+      const hint=target.ownerDocument.createElement('p');hint.className='cz-help';hint.dataset.collectionsEmpty='';hint.textContent='Marque coleções como destaque no painel.';target.append(hint);
+    }
     target.querySelectorAll('input,textarea,button').forEach(control=>{if(this._publishing)control.disabled=true;});
   }
 
@@ -289,7 +293,7 @@ export class StoreCustomizer extends HTMLElement {
   }
 
   _sectionControl(section,index,length) {
-    const labels={hero:['Abertura','Sua primeira impressão'],products:['Catálogo','Os produtos da loja'],about:['Sobre a marca','Sua história e propósito']},[label,description]=labels[section.id]||[section.id,''];
+    const labels={hero:['Abertura','Sua primeira impressão'],collections:['Coleções em destaque','Mostre os universos da sua marca'],products:['Catálogo','Os produtos da loja'],about:['Sobre a marca','Sua história e propósito']},[label,description]=labels[section.id]||[section.id,''];
     return `<div class="cz-section-row ${!section.visible?'is-hidden':''}"><div class="cz-section-order"><button type="button" class="cz-icon-button" data-move="${section.id}" data-direction="-1" aria-label="Mover ${label.toLowerCase()} para cima" ${index===0?'disabled':''}>${icon('up')}</button><button type="button" class="cz-icon-button" data-move="${section.id}" data-direction="1" aria-label="Mover ${label.toLowerCase()} para baixo" ${index===length-1?'disabled':''}>${icon('down')}</button></div><div class="cz-section-name"><strong>${label}</strong><span>${description}</span></div>${section.id==='products'?`<span class="cz-section-locked" title="O catálogo fica sempre visível">${icon('lock')}<span>Essencial</span></span>`:`<label class="cz-section-visibility"><input type="checkbox" data-section="${section.id}" ${section.visible?'checked':''} aria-label="Mostrar ${label.toLowerCase()}"><span class="cz-toggle" aria-hidden="true"></span></label>`}</div>`;
   }
 
@@ -298,7 +302,7 @@ export class StoreCustomizer extends HTMLElement {
     const previewStore={...this._store,...this._state.brand,design:this._state.design,accent:this._state.design.accent,background:this._state.design.background};
     for (const target of this.shadowRoot.querySelectorAll('.cz-store-preview,.cz-modal-content')) {
       if(target.classList.contains('cz-modal-content')&&!this.shadowRoot.querySelector('dialog').open)continue;
-      target.innerHTML=renderStoreShell(previewStore,{preview:true,products:this._products});
+      target.innerHTML=renderStoreShell(previewStore,{preview:true,products:this._products,collections:this._collections});
       const grid=target.querySelector('.shop-product-grid');
       if(grid && this._products.length) grid.innerHTML=renderProductCards(this._products,{preview:true});
       target.querySelectorAll('a,button,input,select').forEach(element=>{
@@ -310,6 +314,7 @@ export class StoreCustomizer extends HTMLElement {
       target.querySelectorAll('.shop-wordmark,.store-logo,.shop-brand').forEach(element=>{element.dataset.previewEdit='brand';element.title='Editar sua marca';element.tabIndex=0;element.setAttribute('role','button');});
       target.querySelectorAll('.shop-logo').forEach(element=>{element.dataset.previewEdit='brand';element.title='Editar sua marca';});
       target.querySelectorAll('.shop-catalog').forEach(element=>{element.dataset.previewEdit='catalog';element.title='Editar visual do catálogo';element.tabIndex=0;element.setAttribute('role','button');element.setAttribute('aria-label','Editar visual do catálogo');});
+      target.querySelectorAll('.shop-collections').forEach(element=>{element.dataset.previewEdit='collections';element.title='Editar seção de coleções em destaque';element.tabIndex=0;element.setAttribute('role','button');element.setAttribute('aria-label','Editar seção de coleções em destaque');});
     }
   }
 
@@ -398,8 +403,8 @@ export class StoreCustomizer extends HTMLElement {
 
   _editFromPreview(kind) {
     const dialog=this.shadowRoot.querySelector('dialog');if(dialog.open)dialog.close();
-    this._activeTab=kind==='catalog'?'visual':'brand';this._renderControls();
-    const focus=this.shadowRoot.querySelector(kind==='headline'?'#cz-brand-headline':kind==='brand'?'#cz-brand-name':'[data-option="gridColumns"]');
+    this._activeTab=kind==='collections'?'sections':kind==='catalog'?'visual':'brand';this._renderControls();
+    const focus=this.shadowRoot.querySelector(kind==='collections'?'[data-section="collections"]':kind==='headline'?'#cz-brand-headline':kind==='brand'?'#cz-brand-name':'[data-option="gridColumns"]');
     focus?.focus();focus?.scrollIntoView?.({behavior:'smooth',block:'nearest'});
   }
 

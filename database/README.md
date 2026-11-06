@@ -143,3 +143,7 @@ node --test --test-isolation=none tests/storage.test.mjs
 ```
 
 This isolated policy test does not replace an actual hosted Storage upload or MIME/size enforcement check through Supabase Storage API.
+
+## Collections upgrade
+
+`collections.sql` adds `collections` and `collection_products`. Public reads require an active collection and published store; membership additionally hides inactive products. Owners see their own drafts and inactive relationships. There are no direct client mutations. `save_collection(p_store_id uuid,p_collection jsonb,p_product_ids uuid[])` calls an authorized private implementation and atomically replaces membership without changing products, stock or orders. A product may belong to multiple collections; slugs are unique within each store. Full collection form: optional `id`, `name`, `slug`, `description`, `image_url`, `active`, `featured`, `sort_order`; up to 500 product IDs are accepted and deduplicated while preserving first occurrence. Returns collection JSON plus ordered `product_ids`.

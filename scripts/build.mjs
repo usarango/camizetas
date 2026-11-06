@@ -13,5 +13,5 @@ if(supabaseKey){
 await writeFile('dist/config.js',`globalThis.CAMIZETAS_CONFIG = ${JSON.stringify({supabaseUrl,supabaseKey})};\n`);
 const entryPoints={};for(const name of ['painel','shops','storefront','landing-creative']){await access(path.join(root,'src',name+'.js'));entryPoints[name]=path.join(root,'src',name+'.js')}
 await build({entryPoints,outdir:'dist',bundle:true,format:'esm',platform:'browser',target:['es2022'],minify:true,sourcemap:false,legalComments:'none'});
-await mkdir('dist/database',{recursive:true});await copyFile('database/design.sql','dist/database/design.sql');
+await mkdir('dist/database',{recursive:true});await copyFile('database/design.sql','dist/database/design.sql');await copyFile('database/collections.sql','dist/database/collections.sql');
 console.log(`Built storefront, directory and seller dashboard. Database ${supabaseUrl?'configured':'awaiting free-project configuration'}.`);

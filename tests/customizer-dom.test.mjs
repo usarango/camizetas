@@ -46,7 +46,7 @@ test('creative editor: real previews, eight templates, accessible controls and r
   root.querySelector('[data-action="mobile"]').click();assert.ok(root.querySelector('.cz-device.is-mobile'));
   root.querySelector('[data-tab="sections"]').click();
   const visible=root.querySelector('[data-section="about"]');visible.checked=true;visible.dispatchEvent(new window.Event('change',{bubbles:true}));assert.ok(root.querySelector('.shop-about'));
-  root.querySelector('[data-move="about"][data-direction="-1"]').click();assert.deepEqual([...editor.payload.design.sections.map(section=>section.id)],['hero','about','products']);
+  root.querySelector('[data-move="about"][data-direction="-1"]').click();assert.deepEqual([...editor.payload.design.sections.map(section=>section.id)],['hero','collections','about','products']);
   assert.equal(root.querySelector('[data-section="products"]'),null);
   root.querySelector('[data-action="expand"]').click();assert.equal(root.querySelector('dialog').open,true);root.querySelector('[data-action="close-preview"]').click();assert.equal(root.querySelector('dialog').open,false);
   await context.close();
@@ -114,4 +114,55 @@ test('creative editor: pending drafts and uploads protect navigation, disconnect
   assert.equal(JSON.parse(window.localStorage.getItem('cz-design-draft:owner-1:store-1')).brand.name,'Rascunho ao sair');
   window.document.body.append(editor);await editor.saveCurrentDraft();assert.match(root.querySelector('.cz-save-state').textContent,/salvo/);
   await context.close();
+});
+
+test('creative editor: real featured collections are independently configured, editable as a section and never copied into drafts',async()=>{
+  const collections=[
+    {id:'featured',slug:'dias-livres',name:'Dias <livres>',description:'Conforto para sair da rotina.',image_url:'javascript:alert(1)',active:true,featured:true,sort_order:0},
+    {id:'plain',slug:'classicos',name:'Clássicos',active:true,featured:false,sort_order:1},
+    {id:'archived',slug:'privada',name:'Coleção arquivada',active:false,featured:true,sort_order:-1},
+  ];
+  const context=setup({collections}),{window,editor,root}=context;
+  try {
+    collections[0].name='Alteração externa';
+    assert.equal(root.querySelectorAll('.shop-collection-card').length,1);
+    assert.equal(root.querySelector('.shop-collection-card h3').textContent,'Dias <livres>');
+    assert.equal(root.querySelector('.shop-collection-card img'),null);
+    assert.equal(root.querySelector('.shop-collection-link').hasAttribute('href'),false);
+    assert.equal(root.querySelector('.shop-collection').disabled,true);
+    assert.equal(root.querySelector('.shop-collection').options.length,3);
+    assert.equal(root.querySelector('.cz-store-preview').textContent.includes('Coleção arquivada'),false);
+    root.querySelector('.shop-collections').click();
+    assert.equal(root.querySelector('[data-tab="sections"]').getAttribute('aria-selected'),'true');
+    assert.equal(root.activeElement.dataset.section,'collections');
+    assert.equal(root.querySelector('[data-collections-empty]'),null);
+    const toggle=root.querySelector('[data-section="collections"]');
+    toggle.checked=false;toggle.dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.equal(root.querySelector('.shop-collections'),null);
+    assert.equal(editor.payload.design.sections.find(section=>section.id==='collections').visible,false);
+    assert.equal('collections' in editor.payload,false);
+    assert.equal(JSON.stringify(editor.payload).includes('Dias <livres>'),false);
+    root.querySelector('[data-action="undo"]').click();
+    assert.ok(root.querySelector('.shop-collections'));
+    root.querySelector('[data-move="collections"][data-direction="1"]').click();
+    assert.deepEqual([...editor.payload.design.sections.map(section=>section.id)],['hero','products','collections','about']);
+    assert.deepEqual([...root.querySelector('.cz-store-preview .shop-main').children].map(element=>element.dataset.designSection),['hero','products','collections']);
+    root.querySelector('[data-action="expand"]').click();
+    assert.equal(root.querySelectorAll('.cz-modal-content .shop-collection-card').length,1);
+    assert.equal(root.querySelector('.cz-modal-content .shop-collection-link').hasAttribute('href'),false);
+  } finally { await context.close(); }
+});
+
+test('creative editor: legacy section drafts gain collections before products while an empty store gets only an editor hint',async()=>{
+  const legacy={version:1,brand:{name:'Legado',headline:'Do nosso jeito.',description:''},design:{...createDesign('chic'),sections:[{id:'about',visible:true},{id:'products',visible:true},{id:'hero',visible:false}]}};
+  const context=setup({draft:legacy,collections:[{id:'private',slug:'privada',name:'Privada',active:false,featured:true},{id:'normal',slug:'normal',name:'Normal',active:true,featured:false}]}),{editor,root}=context;
+  try {
+    assert.deepEqual([...editor.payload.design.sections.map(section=>section.id)],['about','collections','products','hero']);
+    assert.equal(root.querySelector('.shop-collections'),null);
+    root.querySelector('[data-tab="sections"]').click();
+    assert.equal(root.querySelector('[data-section="collections"]').checked,true);
+    assert.match(root.querySelector('[data-collections-empty]').textContent,/Marque coleções como destaque no painel/);
+    assert.equal(root.querySelector('.cz-store-preview').textContent.includes('Marque coleções'),false);
+    assert.equal(root.querySelector('.shop-collection').options.length,2);
+  } finally { await context.close(); }
 });

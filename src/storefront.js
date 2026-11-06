@@ -1,13 +1,16 @@
 import {api,money,escapeHTML as esc} from './data.js';
 import {renderStoreShell,renderProductCards} from './store-layout.js';
-const slug=new URLSearchParams(location.search).get('loja');
+const routeParams=new URLSearchParams(location.search);
+const slug=routeParams.get('loja');
+const collectionSlug=routeParams.get('colecao');
+const hasCollectionRoute=routeParams.has('colecao');
 const mount=document.querySelector('#standalone-store');
 const approvedThemes=['chic','underground','rock','nerd'];
 const validColor=(value,fallback)=>/^#[a-f\d]{6}$/i.test(value||'')?value:fallback;
 const imageURL=value=>{try{const url=new URL(value);return url.protocol==='https:'?url.href:'assets/product-placeholder.svg'}catch{return 'assets/product-placeholder.svg'}};
 function contrast(hex){const rgb=hex.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722>.179?'#000000':'#ffffff'}
 const readJSON=(storage,key,fallback)=>{try{return JSON.parse(storage.getItem(key)||'null')??fallback}catch{return fallback}};
-let store,products=[],cart=[],pending=null,busy=false,currentUser=null,category='Todos',modal=null,modalVersion=0;
+let store,products=[],collections=[],activeCollection=null,cart=[],pending=null,busy=false,currentUser=null,category='Todos',modal=null,modalVersion=0;
 const itemVariant=id=>{for(const product of products){const variant=(product.variants||[]).find(v=>v.id===id);if(variant)return {product,variant}}return null};
 const activeVariant=v=>v.active!==false&&Number.isInteger(v.on_hand)&&v.on_hand>0;
 const stockMessage='A disponibilidade mudou. Confira sua sacola antes de enviar o pedido.';
@@ -20,9 +23,47 @@ function pendingNotice(){alert('Há um pedido aguardando confirmação de envio.
 function openModal(content){if(modal?.open)modal.close();modal?.remove();modal=document.createElement('dialog');modal.className='shop-modal';modal.innerHTML=`<button class="shop-modal-close" aria-label="Fechar">×</button>${content}`;document.body.append(modal);modal.querySelector('.shop-modal-close').onclick=()=>{if(!busy)modal.close()};modal.addEventListener('cancel',e=>{if(busy)e.preventDefault()});modal.addEventListener('click',e=>{if(e.target===modal&&!busy){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close()}});modal.showModal();modalVersion++;return modal}
 function setMessage(dialog,text,isError=false){const el=dialog.querySelector('.message');if(el){el.textContent=text;el.classList.toggle('error',isError)}}
 let ownerBarVersion=0;
-async function refreshOwnerBar(){if(!store||!mount||typeof api.getManagedStore!=='function')return;const version=++ownerBarVersion;try{const managed=await api.getManagedStore(store.id);if(version!==ownerBarVersion)return;mount.querySelector('.store-ownerbar')?.remove();if(!managed||managed.id!==store.id)return;const bar=document.createElement('div');bar.className='store-ownerbar';bar.innerHTML=`<span>Você está vendo a sua loja.</span><a href="painel.html?loja=${encodeURIComponent(store.id)}&espaco=1">Personalizar minha loja ↗</a>`;mount.prepend(bar)}catch{if(version===ownerBarVersion)mount.querySelector('.store-ownerbar')?.remove()}}
-function render(){mount.innerHTML=renderStoreShell(store,{products,category});mount.querySelector('.shop-category').onchange=e=>{category=e.target.value;renderProducts()};mount.querySelector('.shop-bag-button').onclick=openCart;renderProducts();updateCount();refreshOwnerBar();mount.querySelectorAll('img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'})}
-function renderProducts(){const list=products.filter(p=>category==='Todos'||p.category===category);mount.querySelector('.shop-product-grid').innerHTML=renderProductCards(list);const empty=mount.querySelector('.shop-empty');empty.hidden=list.length>0;empty.textContent=products.length?'Nenhum produto nesta categoria por enquanto.':'Nossa próxima coleção está chegando. Volte em breve.';mount.querySelectorAll('[data-product]').forEach(b=>b.onclick=()=>openProduct(b.dataset.product));mount.querySelectorAll('.shop-product-photo img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'})}
+async function refreshOwnerBar(){if(!store||!mount||typeof api.getManagedStore!=='function')return;const version=++ownerBarVersion;try{const managed=await api.getManagedStore(store.id);if(version!==ownerBarVersion)return;mount.querySelector('.store-ownerbar')?.remove();if(!managed||managed.id!==store.id)return;const bar=document.createElement('div');bar.className='store-ownerbar';bar.innerHTML=`<span>Você está vendo a sua loja.</span><a href="painel.html?loja=${encodeURIComponent(store.id)}&espaco=1">Personalizar minha loja ↗</a><a href="painel.html?loja=${encodeURIComponent(store.id)}&colecoes=1">Gerenciar coleções ↗</a>`;mount.prepend(bar)}catch{if(version===ownerBarVersion)mount.querySelector('.store-ownerbar')?.remove()}}
+function visibleProducts(){
+  const catalogue=products.filter(product=>product&&product.active!==false);
+  if(!hasCollectionRoute)return catalogue;
+  if(!activeCollection)return [];
+  const byId=new Map(catalogue.map(product=>[product.id,product]));
+  return [...new Set(activeCollection.product_ids)].map(id=>byId.get(id)).filter(Boolean);
+}
+function render(){
+  const viewProducts=visibleProducts();
+  if(category!=='Todos'&&!viewProducts.some(product=>product.category===category))category='Todos';
+  mount.innerHTML=renderStoreShell(store,{products:viewProducts,collections,activeCollection,category});
+  mount.querySelector('.shop-category').onchange=e=>{category=e.target.value;renderProducts()};
+  mount.querySelector('.shop-bag-button').onclick=openCart;
+  const collectionSelect=mount.querySelector('.shop-collection');
+  if(collectionSelect)collectionSelect.onchange=()=>navigateToCollection(collectionSelect.value);
+  renderProducts();updateCount();refreshOwnerBar();
+  mount.querySelectorAll('img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'});
+}
+function navigateToCollection(value){
+  if(value&&!collections.some(collection=>collection.slug===value&&collection.active!==false))return;
+  const destination=new URL('loja.html',location.href);
+  destination.searchParams.set('loja',store.slug);
+  for(const key of ['utm_source','utm_medium','utm_campaign','ref']){
+    const original=routeParams.get(key);
+    if(original&&original.length<=200)destination.searchParams.set(key,original);
+  }
+  if(value)destination.searchParams.set('colecao',value);
+  saveCart();
+  location.assign(destination.href);
+}
+function renderProducts(){
+  const viewProducts=visibleProducts();
+  const list=viewProducts.filter(product=>category==='Todos'||product.category===category);
+  mount.querySelector('.shop-product-grid').innerHTML=renderProductCards(list);
+  const empty=mount.querySelector('.shop-empty');
+  empty.hidden=list.length>0;
+  empty.textContent=viewProducts.length?'Nenhum produto nesta categoria por enquanto.':activeCollection?'Esta coleção ainda não tem peças disponíveis. Confira as outras peças da loja.':'Nossa próxima coleção está chegando. Volte em breve.';
+  mount.querySelectorAll('[data-product]').forEach(button=>button.onclick=()=>openProduct(button.dataset.product));
+  mount.querySelectorAll('.shop-product-photo img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'});
+}
 function openProduct(id){const product=products.find(p=>p.id===id);if(!product)return;const variants=(product.variants||[]).filter(v=>v.active!==false);const available=variants.filter(activeVariant);const dialog=openModal(`<img class="shop-detail-img" src="${esc(imageURL(product.image_url))}" alt="${esc(product.name)}"><h2>${esc(product.name)}</h2><p class="shop-detail-description">${esc(product.description||'')}</p><p class="shop-detail-price">${money(product.price_cents)}</p><form id="product-choice"><label>Escolha a variação<select name="variant" required ${!available.length?'disabled':''}>${variants.map(v=>`<option value="${esc(v.id)}" ${!activeVariant(v)?'disabled':''}>${esc([v.size,v.color].filter(Boolean).join(' / ')||v.sku||'Única')}${!activeVariant(v)?' — esgotada':''}</option>`).join('')}</select></label><label>Quantidade<input type="number" name="quantity" value="1" min="1" max="99" step="1" required></label><p class="muted" id="variant-stock"></p><button class="cz-button" type="submit" ${!available.length?'disabled':''}>${available.length?'Adicionar à sacola ↗':'Peça esgotada'}</button><p class="message" role="status"></p></form>`);const form=dialog.querySelector('form');if(available.length)form.elements.variant.value=available[0].id;const update=()=>{const variant=variants.find(v=>v.id===form.elements.variant.value);const inBag=cart.find(i=>i.variant_id===variant?.id)?.quantity||0;const limit=Math.max(0,Math.min(99,(variant?.on_hand||0)-inBag));form.elements.quantity.max=String(limit||1);dialog.querySelector('#variant-stock').textContent=limit?`${limit} unidade(s) disponível(is) para adicionar.`:'Esta variação já está toda na sua sacola ou está esgotada.';form.querySelector('button[type=submit]').disabled=limit<1};form.elements.variant.onchange=update;update();form.onsubmit=e=>{e.preventDefault();if(pending){pendingNotice();return}const id=form.elements.variant.value,variant=variants.find(v=>v.id===id),qty=Number(form.elements.quantity.value),existing=cart.find(x=>x.variant_id===id);if(!variant||!Number.isInteger(qty)||qty<1||qty+(existing?.quantity||0)>Math.min(99,variant.on_hand)){setMessage(dialog,'Escolha uma quantidade disponível.',true);return}if(existing)existing.quantity+=qty;else cart.push({variant_id:id,quantity:qty});saveCart();dialog.close();alert(`${product.name} foi adicionada à sacola.`)}}
 function cartRows(){return cart.map(item=>{const found=itemVariant(item.variant_id);return {...item,...found}})}
 function validateCart(){if(!cart.length)return 'Sua sacola está vazia.';for(const row of cartRows()){if(!row.product||!row.variant||row.product.active===false||row.variant.active===false||row.quantity>row.variant.on_hand)return stockMessage}return ''}
@@ -36,7 +77,52 @@ const field=(name,label,value='',attributes='')=>`<label>${label}<input name="${
 function customerForm(customer={}){const a=customer.address||{};return `<div class="shop-form-grid"><div class="full">${field('name','Seu nome',customer.name,'required minlength="2" maxlength="120" autocomplete="name"')}</div><div class="full">${field('phone','Celular / WhatsApp',customer.phone,'required minlength="8" maxlength="24" type="tel" autocomplete="tel"')}</div><div>${field('postal_code','CEP',a.postal_code,'required maxlength="12" autocomplete="postal-code"')}</div><div>${field('state','UF',a.state,'required minlength="2" maxlength="2" autocomplete="address-level1"')}</div><div class="full">${field('street','Rua / avenida',a.street,'required maxlength="160" autocomplete="address-line1"')}</div><div>${field('number','Número',a.number,'required maxlength="20"')}</div><div>${field('complement','Complemento',a.complement,'maxlength="100"')}</div><div>${field('neighborhood','Bairro',a.neighborhood,'required maxlength="100"')}</div><div>${field('city','Cidade',a.city,'required maxlength="100" autocomplete="address-level2"')}</div><label class="full">Observações<textarea name="notes" rows="2" maxlength="500">${esc(customer.notes||'')}</textarea></label></div>`}
 function openCheckout(){if(!currentUser){openAuth();return}if(pending&&pending.userId!==currentUser.id){openPendingAccountGate();return}const checkoutUserId=currentUser.id;const issue=validateCart();if(issue&&!pending){openCart();return}const customer=pending?.customer||{},dialog=openModal(`<h2>${pending?'Retomar seu pedido.':'Falta pouco para ser seu.'}</h2><p class="shop-modal-intro">${esc(store.name)} · seus dados serão compartilhados com esta loja para o atendimento do pedido.</p><form id="checkout-form">${customerForm(customer)}<div class="checkout-review"><p><strong>Produtos: ${money(cartRows().reduce((n,r)=>n+(r.product?.price_cents||0)*r.quantity,0))}</strong></p><p>Sem cobrança online. A loja combinará o pagamento, o frete e a entrega com você.</p></div>${pending?'<p class="checkout-hint">Este pedido já foi enviado, mas a confirmação não chegou. Os dados foram mantidos para repetir o mesmo envio sem criar outro pedido.</p>':''}<button class="cz-button" type="submit">${pending?'Repetir o mesmo envio':'Enviar pedido'} ↗</button><p class="message" role="status"></p></form>`);const form=dialog.querySelector('form');if(pending)form.querySelectorAll('input,textarea').forEach(el=>el.readOnly=true);form.onsubmit=async e=>{e.preventDefault();if(busy)return;const submit=form.querySelector('[type=submit]');busy=true;submit.disabled=true;setMessage(dialog,'Enviando seu pedido…');try{const verifiedUser=await api.authUser();if(!verifiedUser||verifiedUser.id!==checkoutUserId||(pending&&pending.userId!==verifiedUser.id)){currentUser=verifiedUser;busy=false;if(pending)openPendingAccountGate();else openAccountChanged();return}currentUser=verifiedUser;if(!pending){const data=Object.fromEntries(new FormData(form));const customer={name:data.name.trim(),phone:data.phone.trim(),address:Object.fromEntries(['street','number','complement','neighborhood','city','state','postal_code'].map(k=>[k,String(data[k]||'').trim()])),notes:data.notes.trim()};const key=crypto.randomUUID();storePending({key,userId:verifiedUser.id,items:cart.map(i=>({...i})),customer})}const submitted=pending,order=await api.placeOrder(store.id,submitted.items,submitted.customer,submitted.key);if(!order?.id)throw new Error('O servidor não confirmou o pedido. Tente novamente para consultar o mesmo envio.');const responseUser=await api.authUser();currentUser=responseUser;if(!responseUser||responseUser.id!==submitted.userId){busy=false;openPendingAccountGate();return}const sameCart=JSON.stringify(cart)===JSON.stringify(submitted.items);if(sameCart){cart=[];saveCart()}storePending(null);busy=false;showSuccess(order);refreshProducts().catch(()=>{})}catch(error){const code=String(error.code||'');const confirmedDatabaseRejection=/^(P\d{4}|2[23]\d{3}|42\d{3}|42501)$/.test(code);if(confirmedDatabaseRejection){storePending(null);await refreshProducts().catch(()=>{});form.querySelectorAll('input,textarea').forEach(el=>el.readOnly=false);setMessage(dialog,error.message||'Revise os dados e a disponibilidade da sua sacola.',true)}else{setMessage(dialog,`${error.message||'Não recebemos a confirmação.'} Tente novamente: o mesmo pedido será consultado sem duplicar o envio.`,true);form.querySelectorAll('input,textarea').forEach(el=>el.readOnly=true);submit.textContent='Repetir o mesmo envio ↗'}}finally{busy=false;if(submit.isConnected)submit.disabled=false}}}
 function showSuccess(order){const number=order.order_number??order.id.slice(0,8),dialog=openModal(`<div class="order-success-symbol"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="m14 24 7 7 13-14" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h2>Seu pedido chegou à loja.</h2><p class="order-success-number">Pedido #${esc(number)}</p><p class="shop-modal-intro">${esc(store.name)} recebeu suas escolhas e seus dados de contato. O pagamento ainda será combinado; este envio não realizou cobrança.</p><div class="checkout-review"><p>Total de produtos: <strong>${money(order.total_cents)}</strong></p><p>Status: recebido</p></div><a class="cz-button" href="painel.html?compras=1">Acompanhar meus pedidos ↗</a><button class="cz-button secondary" id="keep-shopping">Continuar explorando</button>`);dialog.querySelector('#keep-shopping').onclick=()=>dialog.close();alert(`Pedido #${number} enviado. Acompanhe pelo link “Meus pedidos”.`)}
-async function refreshProducts(){products=await api.getPublicProducts(store.id);renderProducts()}
-async function boot(){if(!slug||!mount)return;const link=document.createElement('link');link.rel='stylesheet';link.href='lojas.css';document.head.append(link);const designCSS=document.createElement('link');designCSS.rel='stylesheet';designCSS.href='store-design.css';document.head.append(designCSS);document.body.classList.add('live-store-page');const bar=document.querySelector('.demo-bar');if(bar)bar.innerHTML='<a href="lojas.html">← Explorar lojas</a><span class="demo-label">CAMIZETAS · MARCAS INDEPENDENTES</span><a href="painel.html?compras=1">Meus pedidos ↗</a>';mount.innerHTML='<div class="shop-loading" role="status">Preparando a loja…</div>';if(!api.ready){mount.innerHTML='<div class="shop-loading">Esta loja ainda está aguardando a conexão do banco. <a href="lojas.html">Voltar às lojas</a>.</div>';return}try{store=await api.getPublicStore(slug);if(!store){mount.innerHTML='<div class="shop-loading">Esta loja não está disponível. <a href="lojas.html">Conheça outras marcas</a>.</div>';return}products=await api.getPublicProducts(store.id);document.title=`${store.name} — Camizetas`;loadCart();render();watchCheckoutAccount();if(pending)alert('Há um envio de pedido sem confirmação. Abra sua sacola para retomá-lo com segurança.')}catch(error){mount.innerHTML=`<div class="shop-loading">${esc(error.message||'Não foi possível abrir esta loja.')} <a href="lojas.html">Voltar às lojas</a>.</div>`}}
+function collectionMatchesStore(collection){
+  return !!collection&&typeof collection==='object'&&!Array.isArray(collection)&&collection.active!==false&&collection.slug===collectionSlug&&(!collection.store_id||collection.store_id===store.id)&&Array.isArray(collection.product_ids);
+}
+async function loadCollectionMetadata(){
+  if(typeof api.getPublicCollections!=='function')return [];
+  const rows=await api.getPublicCollections(store.id);
+  return Array.isArray(rows)?rows.filter(collection=>collection&&typeof collection==='object'&&collection.active!==false&&(!collection.store_id||collection.store_id===store.id)):[];
+}
+async function loadActiveCollection(){
+  if(!hasCollectionRoute)return null;
+  if(!collectionSlug||typeof api.getPublicCollection!=='function')return null;
+  const collection=await api.getPublicCollection(store.id,collectionSlug);
+  return collectionMatchesStore(collection)?collection:null;
+}
+function renderCollectionUnavailable(){
+  ownerBarVersion++;
+  document.title=`Coleção indisponível — ${store.name} — Camizetas`;
+  const href=`loja.html?loja=${encodeURIComponent(store.slug)}#collection`;
+  mount.innerHTML=`<div class="shop-loading" role="status"><h1>Esta coleção não está disponível.</h1><p>Ela pode ter sido retirada da vitrine ou o endereço pode ter mudado.</p><p><a href="${esc(href)}">Ver todos os produtos de ${esc(store.name)}</a></p></div>`;
+}
+async function refreshProducts(){
+  const [catalogue,metadata]=await Promise.all([api.getPublicProducts(store.id),loadCollectionMetadata()]);
+  products=Array.isArray(catalogue)?catalogue:[];collections=metadata;
+  activeCollection=await loadActiveCollection();
+  if(hasCollectionRoute&&!activeCollection){renderCollectionUnavailable();return}
+  render();
+}
+async function boot(){
+  if(!slug||!mount)return;
+  const link=document.createElement('link');link.rel='stylesheet';link.href='lojas.css';document.head.append(link);
+  const designCSS=document.createElement('link');designCSS.rel='stylesheet';designCSS.href='store-design.css';document.head.append(designCSS);
+  document.body.classList.add('live-store-page');
+  const bar=document.querySelector('.demo-bar');if(bar)bar.innerHTML='<a href="lojas.html">← Explorar lojas</a><span class="demo-label">CAMIZETAS · MARCAS INDEPENDENTES</span><a href="painel.html?compras=1">Meus pedidos ↗</a>';
+  mount.innerHTML='<div class="shop-loading" role="status">Preparando a loja…</div>';
+  if(!api.ready){mount.innerHTML='<div class="shop-loading">Esta loja ainda está aguardando a conexão do banco. <a href="lojas.html">Voltar às lojas</a>.</div>';return}
+  try{
+    store=await api.getPublicStore(slug);
+    if(!store){mount.innerHTML='<div class="shop-loading">Esta loja não está disponível. <a href="lojas.html">Conheça outras marcas</a>.</div>';return}
+    const [catalogue,metadata]=await Promise.all([api.getPublicProducts(store.id),loadCollectionMetadata()]);
+    products=Array.isArray(catalogue)?catalogue:[];collections=metadata;
+    activeCollection=await loadActiveCollection();
+    if(hasCollectionRoute&&!activeCollection){renderCollectionUnavailable();return}
+    document.title=`${activeCollection?activeCollection.name+' — ':''}${store.name} — Camizetas`;
+    loadCart();render();watchCheckoutAccount();
+    if(pending)alert('Há um envio de pedido sem confirmação. Abra sua sacola para retomá-lo com segurança.');
+  }catch(error){mount.innerHTML=`<div class="shop-loading">${esc(error.message||'Não foi possível abrir esta loja.')} <a href="lojas.html">Voltar às lojas</a>.</div>`}
+}
 if(slug&&mount&&api.ready&&typeof api.onAuthChange==='function')api.onAuthChange(()=>setTimeout(refreshOwnerBar,0));
 boot();
