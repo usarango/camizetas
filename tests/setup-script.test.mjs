@@ -3,13 +3,13 @@ import { test, before, after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
-let db, setup, schema, storage;
+let db, setup, schema, storage, design;
 const userId='40000000-0000-4000-8000-000000000001';
 const stripTransaction = sql => sql.replace(/^\s*(?:begin|commit);\s*$/gmi,'').trim();
 const normalize = sql => sql.replace(/\s+/g,' ').trim();
 
 before(async()=>{
-  [setup,schema,storage]=await Promise.all(['setup.sql','schema.sql','storage.sql'].map(file=>readFile(new URL(`../database/${file}`,import.meta.url),'utf8')));
+  [setup,schema,storage,design]=await Promise.all(['setup.sql','schema.sql','storage.sql','design.sql'].map(file=>readFile(new URL(`../database/${file}`,import.meta.url),'utf8')));
   db=new PGlite();
   await db.waitReady;
   await db.exec(`
@@ -35,10 +35,11 @@ before(async()=>{
 });
 after(async()=>{if(db)await db.close()});
 
-test('one-shot setup contains both tested source scripts, one transaction and schema reload',()=>{
+test('one-shot setup contains all tested source scripts, one transaction and schema reload',()=>{
   const text=normalize(setup);
   assert.ok(text.includes(normalize(stripTransaction(schema))), 'commerce source differs from setup.sql');
   assert.ok(text.includes(normalize(stripTransaction(storage))), 'storage source differs from setup.sql');
+  assert.ok(text.includes(normalize(stripTransaction(design))), 'design source differs from setup.sql');
   assert.equal((setup.match(/^\s*begin;\s*$/gmi)||[]).length,1);
   assert.equal((setup.match(/^\s*commit;\s*$/gmi)||[]).length,1);
   assert.match(setup,/notify\s+pgrst,\s*'reload schema';/i);
@@ -50,10 +51,10 @@ test('one-shot setup contains both tested source scripts, one transaction and sc
 test('combined setup executes against actual PostgreSQL with Supabase auth/storage stubs',async()=>{
   await db.exec(setup);
   const tables=(await db.query("select relname,relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' order by relname")).rows;
-  assert.equal(tables.length,7);
+  assert.equal(tables.length,8);
   assert.ok(tables.every(t=>t.relrowsecurity));
   const functions=(await db.query("select proname,prosecdef from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' order by proname")).rows;
-  assert.deepEqual(functions.map(f=>f.proname),['adjust_stock','create_store','place_order','save_product','transition_order']);
+  assert.deepEqual(functions.map(f=>f.proname),['adjust_stock','create_store','place_order','save_product','save_store_design_draft','transition_order']);
   assert.ok(functions.every(f=>!f.prosecdef));
   const bucket=(await db.query("select public,file_size_limit,allowed_mime_types from storage.buckets where id='camizetas-products'")).rows[0];
   assert.deepEqual(bucket,{public:true,file_size_limit:5242880,allowed_mime_types:['image/jpeg','image/png','image/webp']});

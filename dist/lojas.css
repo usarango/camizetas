@@ -4,3 +4,6 @@
 .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 .directory-invite>a{margin-left:0}.order-success-symbol svg{display:block;width:48px;height:48px}
+
+.store-ownerbar{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:13px 6%;background:#eee7f7;color:#5e3f7c;font:12px/1.5 'DM Sans',sans-serif}.store-ownerbar a{font-weight:600;border-bottom:1px solid #bcabd0;padding-bottom:2px}.store-ownerbar a:focus-visible{outline:2px solid #6425d4;outline-offset:4px}@media(max-width:650px){.store-ownerbar{font-size:10px;padding:12px 6%;gap:12px}.store-ownerbar a{white-space:nowrap}}
+.store-card-art.font-editorial>strong{font-family:'Cormorant Garamond',Georgia,serif;font-weight:500}.store-card-art.font-mono>strong{font-family:'Space Mono',monospace}.store-card-art.font-bold>strong{font-family:Impact,sans-serif;font-weight:400;letter-spacing:1px}.store-card-art.preset-botanical{border-radius:50px 0 0 0}.store-card-art.preset-sport>strong{transform:skew(-5deg)}

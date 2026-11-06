@@ -1,4 +1,5 @@
 import {createClient} from '@supabase/supabase-js';
+import {normalizeDesign,resolveDesign,createDesign,designToStorePatch,designText} from './design.js';
 
 export const money = cents => (Number(cents || 0)/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,7 +17,7 @@ const errorMessages={
  'NetworkError when attempting to fetch resource.':'Falha de conexão. Tente novamente.'
 };
 function check(result){if(result.error){const source=result.error;let msg=errorMessages[source.message]||source.message;
- if(['PGRST205','PGRST202','42P01'].includes(source.code))msg='A configuração da Camizetas ainda está sendo concluída. Tente novamente em instantes.';
+ if(['PGRST205','PGRST204','PGRST202','42P01'].includes(source.code))msg='A configuração da Camizetas ainda está sendo concluída. Tente novamente em instantes.';
  if(source.code==='23505')msg='Este endereço de loja ou SKU já está em uso. Escolha outro.';
  if(source.code==='42501')msg='Você não tem acesso a esta operação. Entre com a conta responsável pela loja.';
  if(/insufficient stock|stock would become negative|not enough stock/i.test(msg))msg='Estoque insuficiente. Atualize o carrinho ou informe outra quantidade.';
@@ -26,7 +27,7 @@ function check(result){if(result.error){const source=result.error;let msg=errorM
 async function user(){unavailable();const {data:sessionData,error}=await client.auth.getSession();if(error)throw error;if(!sessionData.session)return null;return check(await client.auth.getUser())?.user||null}
 async function requireUser(){const u=await user();if(!u)throw new Error('Entre na sua conta para continuar.');return u}
 async function rpc(name,args){unavailable();return check(await client.rpc(name,args))}
-const storeFields=['name','slug','description','template','accent','background','headline','published'];
+const storeFields=['name','slug','description','template','accent','background','headline','published','design'];
 export const api={
  ready:configured,
  async authUser(){if(!client)return null;return user()},
@@ -39,15 +40,21 @@ export const api={
  async uploadProductImage(storeId,file){await requireUser();if(!file||!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size<1||file.size>5*1024*1024)throw new Error('Escolha uma foto JPG, PNG ou WebP de até 5 MB.');const bytes=new Uint8Array(await file.slice(0,16).arrayBuffer());const png=bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71;const jpeg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255;const webp=String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP';if(!({ 'image/png':png,'image/jpeg':jpeg,'image/webp':webp}[file.type]))throw new Error('O arquivo não parece ser uma imagem válida. Escolha outra foto.');const ext={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'}[file.type],path=`${storeId}/${crypto.randomUUID()}.${ext}`;check(await client.storage.from('camizetas-products').upload(path,file,{contentType:file.type,cacheControl:'3600',upsert:false}));return client.storage.from('camizetas-products').getPublicUrl(path).data.publicUrl},
  async getMyStores(){const u=await requireUser();return check(await client.from('stores').select('*').eq('owner_id',u.id).order('created_at',{ascending:true}))},
  async createStore({name,slug}){await requireUser();const store=await rpc('create_store',{p_name:name.trim(),p_slug:slug.trim().toLowerCase()});return store},
- async updateStore(id,patch){await requireUser();const data=Object.fromEntries(storeFields.filter(k=>Object.hasOwn(patch,k)).map(k=>[k,patch[k]]));return check(await client.from('stores').update(data).eq('id',id).select('*').single())},
+ async updateStore(id,patch){const u=await requireUser();const data=Object.fromEntries(storeFields.filter(k=>Object.hasOwn(patch,k)).map(k=>[k,patch[k]]));if(Object.hasOwn(data,'design'))data.design=normalizeDesign(data.design,data);else if(['template','accent','background'].some(k=>Object.hasOwn(data,k))){const current=check(await client.from('stores').select('*').eq('id',id).eq('owner_id',u.id).single());if(Object.hasOwn(current,'design')){let design=resolveDesign(current);if(data.template&&data.template!==current.template)design=createDesign(data.template);if(data.accent)design.accent=data.accent;if(data.background)design.background=data.background;data.design=normalizeDesign(design)}}return check(await client.from('stores').update(data).eq('id',id).eq('owner_id',u.id).select('*').single())},
+ async getManagedStore(id){const u=await api.authUser();if(!u)return null;return check(await client.from('stores').select('*').eq('id',id).eq('owner_id',u.id).maybeSingle())},
+ async loadDesignDraft(storeId){await requireUser();const result=await client.from('store_design_drafts').select('payload,updated_at').eq('store_id',storeId).maybeSingle();if(result.error&&['PGRST205','PGRST204','42P01','42703'].includes(result.error.code))return {available:false,draft:null};const row=check(result);return {available:true,draft:row?{...row.payload,updatedAt:row.updated_at}:null}},
+ async saveDesignDraft(storeId,payload){await requireUser();const raw=payload?.brand||{},brand={name:designText(raw.name,80),headline:designText(raw.headline,100),description:designText(raw.description,3000)};return rpc('save_store_design_draft',{p_store_id:storeId,p_payload:{version:1,brand,design:normalizeDesign(payload?.design)}})},
+ async publishDesign(storeId,payload){const u=await requireUser();const patch=designToStorePatch(payload?.design,payload?.brand);if(patch.name.length<2)throw new Error('O nome da loja deve ter pelo menos 2 caracteres.');return check(await client.from('stores').update(patch).eq('id',storeId).eq('owner_id',u.id).select('*').single())},
+ async deleteDesignDraft(storeId){await requireUser();return check(await client.from('store_design_drafts').delete().eq('store_id',storeId))},
+ async uploadStoreImage(storeId,file){return api.uploadProductImage(storeId,file)},
  async getProducts(storeId){await requireUser();return check(await client.from('products').select('*,variants(*)').eq('store_id',storeId).order('created_at',{ascending:false}))},
  async saveProduct(storeId,product,variants){return rpc('save_product',{p_store_id:storeId,p_product:product,p_variants:variants})},
  async adjustStock(variantId,delta,reason){return rpc('adjust_stock',{p_variant_id:variantId,p_delta:Number(delta),p_reason:reason})},
  async getOrders(storeId){await requireUser();return check(await client.from('orders').select('*,items:order_items(*),events:order_events(*)').eq('store_id',storeId).order('created_at',{ascending:false}).limit(500))},
  async transitionOrder(id,status,trackingCode=null){return rpc('transition_order',{p_order_id:id,p_status:status,p_tracking_code:trackingCode||null})},
  async getInventoryMovements(storeId){await requireUser();const rows=check(await client.from('inventory_movements').select('*,variant:variants(sku,size,color,product:products(name))').eq('store_id',storeId).order('created_at',{ascending:false}).limit(200));return rows.map(r=>({...r,delta:r.quantity,quantity_delta:r.quantity,sku:r.variant?.sku,product_name:r.variant?.product?.name,variant_name:[r.variant?.size,r.variant?.color].filter(Boolean).join(' / ')}))},
- async getPublicStores(){unavailable();return check(await client.from('stores').select('id,name,slug,description,template,accent,background,headline').eq('published',true).order('created_at',{ascending:false}).limit(100))},
- async getPublicStore(slug){unavailable();return check(await client.from('stores').select('id,name,slug,description,template,accent,background,headline').eq('slug',slug).eq('published',true).maybeSingle())},
+ async getPublicStores(){unavailable();return check(await client.from('stores').select('*').eq('published',true).order('created_at',{ascending:false}).limit(100))},
+ async getPublicStore(slug){unavailable();return check(await client.from('stores').select('*').eq('slug',slug).eq('published',true).maybeSingle())},
  async getPublicProducts(storeId){unavailable();const rows=check(await client.from('products').select('*,variants(*)').eq('store_id',storeId).eq('active',true).order('created_at',{ascending:false}));return rows.map(p=>({...p,variants:p.variants.filter(v=>v.active)}))},
  async placeOrder(storeId,items,customer,idempotencyKey){await requireUser();return rpc('place_order',{p_store_id:storeId,p_items:items,p_customer:customer,p_idempotency_key:idempotencyKey})},
  async getBuyerOrders(){const u=await requireUser();return check(await client.from('orders').select('*,store:stores(name,slug),items:order_items(*),events:order_events(*)').eq('buyer_id',u.id).order('created_at',{ascending:false}).limit(100))},

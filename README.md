@@ -5,7 +5,9 @@ Plataforma de lojas independentes de roupas e acessórios, com vitrine pública,
 ## Funcionalidades
 
 - Criação de múltiplas lojas, endereço exclusivo e publicação controlada pelo proprietário.
-- Templates Atelier, Subsolo, Amplify e Pixel Club; identidade e cores salvas por loja.
+- Espaço criativo dentro da loja com oito templates: Atelier, Subsolo, Amplify, Pixel Club, Essência, Botânica, Movimento e Pop.
+- Cores, fontes, capa e logo, avisos, cartões, grade e ordem das seções, com prévia do catálogo real em celular/computador.
+- Rascunhos privados na conta, recuperação local, desfazer/refazer e aplicação explícita do visual publicado.
 - Catálogo de produtos, preço em centavos, fotos e variantes por tamanho/cor/SKU.
 - Estoque por variante e ajustes com motivo, autor e histórico.
 - Loja pública com catálogo real, sacola e envio de pedido com endereço de entrega.
@@ -45,7 +47,8 @@ O acesso administrativo ao projeto depende da organização estar autorizada na 
 - `src/data.js`: cliente Supabase, Auth, consultas e RPCs.
 - `src/painel.js`: gestão da loja e compras do cliente.
 - `src/storefront.js`, `src/shops.js`: catálogo público e checkout.
-- `dist/editor.js`: editor visual de templates e prévias conceito.
+- `src/customizer.js`, `src/design.js` e `src/store-layout.js`: espaço criativo e renderização compartilhada entre editor e loja pública.
+- `dist/editor.js`: prévias antigas mantidas por compatibilidade com links já existentes.
 - `database/`: schema transacional, RLS, Storage e contrato das RPCs.
 - `tests/`: testes de PostgreSQL/PLpgSQL/RLS e interações de DOM.
 - `scripts/build.mjs`: build estático; rejeita chaves secretas no bundle.
@@ -60,3 +63,9 @@ A verificação visual em navegador depende da disponibilidade do executor de QA
 ## Referência funcional
 
 O fluxo operacional se inspira no Rango, com adaptação para peças, tamanhos e cores. Nenhum código ou banco operacional do Rango ou do Harvian é modificado pela Camizetas.
+
+## Espaço criativo
+
+Abra **Painel → Espaço criativo**, ou **Personalizar minha loja** na vitrine enquanto estiver conectado como proprietário. As alterações viram rascunhos privados; somente **Aplicar na loja** atualiza o que os clientes veem. O estado de publicação da loja é mantido. O editor também está disponível como demonstração na landing, com importação explícita do rascunho após criar a loja.
+
+Projetos já existentes devem aplicar somente `database/design.sql` para habilitar o novo campo e os rascunhos. `database/setup.sql` já inclui essa atualização para projetos novos. Veja [a configuração](docs/CONFIGURACAO.md).

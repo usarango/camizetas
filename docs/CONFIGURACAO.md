@@ -55,3 +55,9 @@ Publicar o conteúdo de `dist/` no Site existente, preservando `.openai/hosting.
 8. Repetir um envio de checkout com a mesma chave de idempotência e confirmar que não há duplicação.
 
 O gateway de pagamentos, cálculo de frete e geração de fotos por IA não estão integrados. A tela deve sempre apresentar o envio como pedido sem cobrança automática.
+
+## Atualização do Espaço criativo
+
+Para lojas já existentes, execute somente [`database/design.sql`](../database/design.sql) no SQL Editor. A atualização adiciona o design publicado e rascunhos privados, preservando produtos, pedidos, estoque e os quatro valores legados de `template`. Os novos presets são guardados no JSON de design. Esse arquivo pode ser executado novamente sem apagar estilos ou rascunhos.
+
+No painel, abra **Espaço criativo**. Escolha um dos oito pontos de partida, ajuste marca, fontes, capa, paleta e seções. As mudanças de rascunho são salvas na conta e no navegador. **Aplicar na loja** atualiza o visual público em uma operação; uma loja em rascunho continua em rascunho. Visitantes e outros lojistas não recebem acesso ao editor da sua loja.
