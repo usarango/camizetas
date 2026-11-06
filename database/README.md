@@ -18,7 +18,7 @@ All tables are in `public` with RLS enabled. Mutation implementations are in `pr
 
 Anonymous visitors may read published stores, their active products and active variants. An owner also sees archived/unpublished records for their stores. A buyer only sees their own orders, items and state history; an owner sees these for their stores. Inventory history is owner-only.
 
-Clients may directly update only these store columns: `name`, `slug`, `description`, `template`, `accent`, `background`, `headline`, `published`. An owner cannot reassign `owner_id` or store IDs. Other mutations use the RPCs below; no client has table-level insert/delete or direct stock/order-write access.
+Clients may directly update only these store columns: `name`, `slug`, `description`, `template`, `accent`, `background`, `headline`, `published`, plus `design` and `reviews_enabled` after their additive upgrades. An owner cannot reassign `owner_id` or store IDs. Other mutations use the RPCs below; no client has table-level insert/delete or direct stock/order-write access.
 
 ## RPC contracts
 
@@ -147,3 +147,21 @@ This isolated policy test does not replace an actual hosted Storage upload or MI
 ## Collections upgrade
 
 `collections.sql` adds `collections` and `collection_products`. Public reads require an active collection and published store; membership additionally hides inactive products. Owners see their own drafts and inactive relationships. There are no direct client mutations. `save_collection(p_store_id uuid,p_collection jsonb,p_product_ids uuid[])` calls an authorized private implementation and atomically replaces membership without changing products, stock or orders. A product may belong to multiple collections; slugs are unique within each store. Full collection form: optional `id`, `name`, `slug`, `description`, `image_url`, `active`, `featured`, `sort_order`; up to 500 product IDs are accepted and deduplicated while preserving first occurrence. Returns collection JSON plus ordered `product_ids`.
+## Existing installations: image upload permission repair
+
+Run `database/fix-product-image-storage.sql` in the Camizetas project's SQL Editor, or apply the matching `fix_product_image_storage_policy` migration. It corrects the INSERT and DELETE policies to reference `storage.objects.name` explicitly: the unqualified `name` in the store subquery previously resolved to `stores.name`. The script is transactional, safe to rerun, and does not change products, uploaded objects, bucket limits, public-read rules, or store ownership. Do not rerun `setup.sql` on an existing installation.
+
+The original product-image migration is retained as history; the current `storage.sql` includes the correction for new installations. The storage regression tests include the real `stores.name` column, reproduce the original denial, then apply the repair and verify owner upload/deletion and cross-store denials.
+
+## Product pages upgrade
+
+Run only `product-pages.sql` on an existing installation after the earlier upgrades. `products.image_urls` is an ordered list of up to ten HTTPS or local `assets/` images; `save_product` accepts this list atomically with variants and synchronizes `image_url` to its first entry. Missing gallery fields retain existing photos for older clients. The original stock checks, locks and inventory audit remain in place.
+
+`stores.reviews_enabled` defaults to false and is editable only by its owner under the existing store RLS policy. `product_reviews` has one review per product/buyer. Public column grants expose the chosen author name and review content, not `buyer_id`, account details or order information. RLS requires published store, active product and enabled reviews for public visibility. `product_review_summary` is a `security_invoker` view with `review_count` and `average_rating` over all visible reviews.
+
+Authenticated RPCs use the existing public-invoker/private-definer pattern with explicit identity checks:
+
+- `product_review_context(p_product_id uuid)` returns `{can_review,reason,my_review}` for the current account.
+- `save_product_review(p_product_id uuid,p_rating integer,p_title text,p_body text,p_author_name text)` creates or updates only the caller's review and returns safe public fields. A completed order containing that product is required; store owners cannot review their own products. Rating is 1–5, title up to 120 characters, comment 20–2,000 and author name 2–60.
+
+Disabling reviews hides them publicly and rejects further submissions without deleting history. No migration writes orders, changes stock or creates test buyers. See `tests/product-pages-database.test.mjs` for gallery compatibility, actual PostgreSQL RLS, column privacy, purchase verification, rollback and rerun checks.

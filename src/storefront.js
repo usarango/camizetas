@@ -1,5 +1,6 @@
 import {api,money,escapeHTML as esc} from './data.js';
 import {renderStoreShell,renderProductCards} from './store-layout.js';
+import {renderProductPage,renderProductUnavailable,productPhotos} from './product-page.js';
 const routeParams=new URLSearchParams(location.search);
 const slug=routeParams.get('loja');
 const collectionSlug=routeParams.get('colecao');
@@ -11,10 +12,11 @@ const imageURL=value=>{try{const url=new URL(value);return url.protocol==='https
 function contrast(hex){const rgb=hex.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722>.179?'#000000':'#ffffff'}
 const readJSON=(storage,key,fallback)=>{try{return JSON.parse(storage.getItem(key)||'null')??fallback}catch{return fallback}};
 let store,products=[],collections=[],activeCollection=null,cart=[],pending=null,busy=false,currentUser=null,category='Todos',modal=null,modalVersion=0;
+let productViewVersion=0,reviewContextVersion=0,reviewAuthEpoch=0,reviewUserId=null,refreshProductChoice=null;
 const itemVariant=id=>{for(const product of products){const variant=(product.variants||[]).find(v=>v.id===id);if(variant)return {product,variant}}return null};
 const activeVariant=v=>v.active!==false&&Number.isInteger(v.on_hand)&&v.on_hand>0;
 const stockMessage='A disponibilidade mudou. Confira sua sacola antes de enviar o pedido.';
-function saveCart(){try{localStorage.setItem(`cz-cart:${store.id}`,JSON.stringify(cart))}catch{}updateCount()}
+function saveCart(){try{localStorage.setItem(`cz-cart:${store.id}`,JSON.stringify(cart))}catch{}updateCount();refreshProductChoice?.()}
 function loadCart(){const rows=readJSON(localStorage,`cz-cart:${store.id}`,[]);cart=Array.isArray(rows)?rows.filter(x=>x&&typeof x.variant_id==='string'&&Number.isInteger(x.quantity)&&x.quantity>0&&x.quantity<=99):[];pending=readJSON(sessionStorage,`cz-checkout:${store.id}`,null);if(pending&&(!pending.key||typeof pending.userId!=='string'||!pending.userId||!Array.isArray(pending.items)||!pending.customer)){pending=null;try{sessionStorage.removeItem(`cz-checkout:${store.id}`)}catch{}}}
 function storePending(value){pending=value;try{if(value)sessionStorage.setItem(`cz-checkout:${store.id}`,JSON.stringify(value));else sessionStorage.removeItem(`cz-checkout:${store.id}`)}catch{}}
 function updateCount(){const el=mount.querySelector('.shop-bag-count');if(el)el.textContent=String(cart.reduce((n,i)=>n+i.quantity,0))}
@@ -32,6 +34,11 @@ function visibleProducts(){
   return [...new Set(activeCollection.product_ids)].map(id=>byId.get(id)).filter(Boolean);
 }
 function render(){
+  const params=new URLSearchParams(location.search);
+  if(params.has('produto')){renderProductRoute(params.get('produto'));return}
+  document.body.classList.remove('product-detail-open');
+  productViewVersion++;reviewContextVersion++;reviewUserId=null;refreshProductChoice=null;
+  document.title=`${activeCollection?activeCollection.name+' — ':''}${store.name} — Camizetas`;
   const viewProducts=visibleProducts();
   if(category!=='Todos'&&!viewProducts.some(product=>product.category===category))category='Todos';
   mount.innerHTML=renderStoreShell(store,{products:viewProducts,collections,activeCollection,category});
@@ -64,7 +71,119 @@ function renderProducts(){
   mount.querySelectorAll('[data-product]').forEach(button=>button.onclick=()=>openProduct(button.dataset.product));
   mount.querySelectorAll('.shop-product-photo img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'});
 }
-function openProduct(id){const product=products.find(p=>p.id===id);if(!product)return;const variants=(product.variants||[]).filter(v=>v.active!==false);const available=variants.filter(activeVariant);const dialog=openModal(`<img class="shop-detail-img" src="${esc(imageURL(product.image_url))}" alt="${esc(product.name)}"><h2>${esc(product.name)}</h2><p class="shop-detail-description">${esc(product.description||'')}</p><p class="shop-detail-price">${money(product.price_cents)}</p><form id="product-choice"><label>Escolha a variação<select name="variant" required ${!available.length?'disabled':''}>${variants.map(v=>`<option value="${esc(v.id)}" ${!activeVariant(v)?'disabled':''}>${esc([v.size,v.color].filter(Boolean).join(' / ')||v.sku||'Única')}${!activeVariant(v)?' — esgotada':''}</option>`).join('')}</select></label><label>Quantidade<input type="number" name="quantity" value="1" min="1" max="99" step="1" required></label><p class="muted" id="variant-stock"></p><button class="cz-button" type="submit" ${!available.length?'disabled':''}>${available.length?'Adicionar à sacola ↗':'Peça esgotada'}</button><p class="message" role="status"></p></form>`);const form=dialog.querySelector('form');if(available.length)form.elements.variant.value=available[0].id;const update=()=>{const variant=variants.find(v=>v.id===form.elements.variant.value);const inBag=cart.find(i=>i.variant_id===variant?.id)?.quantity||0;const limit=Math.max(0,Math.min(99,(variant?.on_hand||0)-inBag));form.elements.quantity.max=String(limit||1);dialog.querySelector('#variant-stock').textContent=limit?`${limit} unidade(s) disponível(is) para adicionar.`:'Esta variação já está toda na sua sacola ou está esgotada.';form.querySelector('button[type=submit]').disabled=limit<1};form.elements.variant.onchange=update;update();form.onsubmit=e=>{e.preventDefault();if(pending){pendingNotice();return}const id=form.elements.variant.value,variant=variants.find(v=>v.id===id),qty=Number(form.elements.quantity.value),existing=cart.find(x=>x.variant_id===id);if(!variant||!Number.isInteger(qty)||qty<1||qty+(existing?.quantity||0)>Math.min(99,variant.on_hand)){setMessage(dialog,'Escolha uma quantidade disponível.',true);return}if(existing)existing.quantity+=qty;else cart.push({variant_id:id,quantity:qty});saveCart();dialog.close();alert(`${product.name} foi adicionada à sacola.`)}}
+/* Product pages are rendered in the document, keeping the complete store catalogue for the cart. */
+function productRouteURL(id=null){
+  const url=new URL('loja.html',location.href);url.searchParams.set('loja',store.slug);
+  if(hasCollectionRoute&&collectionSlug)url.searchParams.set('colecao',collectionSlug);
+  for(const key of ['utm_source','utm_medium','utm_campaign','ref']){const value=routeParams.get(key);if(value&&value.length<=200)url.searchParams.set(key,value)}
+  if(id!==null)url.searchParams.set('produto',id);
+  return url;
+}
+function closeProductModal(){if(modal?.open)modal.close();modal?.remove();modal=null;modalVersion++}
+function openProduct(id){
+  if(busy)return;
+  const product=products.find(p=>p.id===id&&p.active!==false&&(!p.store_id||p.store_id===store.id));if(!product)return;
+  closeProductModal();saveCart();history.pushState({camizetasProduct:true},'',productRouteURL(id).href);render();
+  document.querySelector('#product-title')?.focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});
+}
+function backToCatalogue(event){
+  if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return;
+  if(event&&hasCollectionRoute&&!new URL(event.currentTarget.href,location.href).searchParams.has('colecao'))return;
+  event?.preventDefault();if(busy)return;
+  closeProductModal();history.pushState({camizetasProduct:false},'',productRouteURL().href);render();window.scrollTo({top:0,behavior:'instant'});
+}
+function productViewCurrent(id,version){return version===productViewVersion&&new URLSearchParams(location.search).get('produto')===id&&!!mount.querySelector('.product-page')}
+function bindProductImages(root){root.querySelectorAll('img').forEach(img=>img.onerror=()=>{img.onerror=null;img.src='assets/product-placeholder.svg'})}
+function renderProductRoute(id){
+  document.body.classList.add('product-detail-open');
+  const version=++productViewVersion;reviewContextVersion++;reviewUserId=null;refreshProductChoice=null;
+  const product=products.find(p=>p.id===id&&p.active!==false&&(!p.store_id||p.store_id===store.id));
+  const backHref=productRouteURL().pathname+productRouteURL().search;
+  if(!product){mount.innerHTML=renderProductUnavailable(store,backHref);document.title=`Peça indisponível — ${store.name} — Camizetas`;mount.querySelectorAll('[data-product-back]').forEach(link=>link.onclick=backToCatalogue);mount.querySelector('.shop-bag-button').onclick=openCart;updateCount();refreshOwnerBar();return}
+  document.title=`${product.name} — ${store.name} — Camizetas`;
+  mount.innerHTML=renderProductPage(store,product,{backHref,collection:activeCollection});
+  mount.querySelectorAll('[data-product-back]').forEach(link=>link.onclick=backToCatalogue);
+  mount.querySelector('.shop-bag-button').onclick=openCart;
+  bindProductGallery(product,version);bindProductPurchase(product,version);bindProductImages(mount);updateCount();refreshOwnerBar();
+  loadRelatedProducts(product,version);
+  if(store.reviews_enabled===true){loadProductReviews(product,version);loadProductReviewContext(product,version)}
+}
+function bindProductGallery(product,version){
+  const photos=productPhotos(product);let index=0;
+  const setPhoto=value=>{if(!productViewCurrent(product.id,version))return;index=(value+photos.length)%photos.length;const image=mount.querySelector('.product-main-image');image.src=photos[index];image.alt=`${product.name} — foto ${index+1} de ${photos.length}`;mount.querySelector('.product-photo-count').textContent=`${String(index+1).padStart(2,'0')} / ${String(photos.length).padStart(2,'0')}`;mount.querySelectorAll('[data-photo]').forEach(button=>{const selected=Number(button.dataset.photo)===index;button.classList.toggle('is-active',selected);button.setAttribute('aria-pressed',String(selected))})};
+  mount.querySelectorAll('[data-photo]').forEach(button=>button.onclick=()=>setPhoto(Number(button.dataset.photo)));
+  mount.querySelector('.product-gallery-prev')?.addEventListener('click',()=>setPhoto(index-1));mount.querySelector('.product-gallery-next')?.addEventListener('click',()=>setPhoto(index+1));
+  mount.querySelector('.product-zoom-trigger').onclick=()=>{
+    const dialog=openModal(`<button type="button" class="product-lightbox-prev" aria-label="Foto anterior" ${photos.length<2?'hidden':''}>←</button><img class="product-lightbox-image" src="${esc(photos[index])}" alt="${esc(product.name)}"><button type="button" class="product-lightbox-next" aria-label="Próxima foto" ${photos.length<2?'hidden':''}>→</button><p class="product-lightbox-caption"></p>`);dialog.className='product-lightbox';dialog.setAttribute('aria-label',`Fotos de ${product.name}`);dialog.querySelector('.shop-modal-close').classList.add('product-lightbox-close');
+    const update=value=>{setPhoto(value);dialog.querySelector('.product-lightbox-image').src=photos[index];dialog.querySelector('.product-lightbox-image').alt=`${product.name} — foto ${index+1} de ${photos.length}`;dialog.querySelector('.product-lightbox-caption').textContent=`${product.name} · ${index+1} / ${photos.length}`};
+    dialog.querySelector('.product-lightbox-prev').onclick=()=>update(index-1);dialog.querySelector('.product-lightbox-next').onclick=()=>update(index+1);dialog.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'){event.preventDefault();update(index-1)}if(event.key==='ArrowRight'){event.preventDefault();update(index+1)}});bindProductImages(dialog);update(index);
+  };
+}
+function bindProductPurchase(product,version){
+  const variants=(product.variants||[]).filter(v=>v.active!==false),available=variants.filter(activeVariant),form=mount.querySelector('#product-choice');
+  if(available.length)form.elements.variant.value=available[0].id;
+  const feedback=text=>{const el=form.querySelector('.product-feedback');el.textContent=text;el.classList.toggle('error',!!text)};
+  const update=()=>{const variant=variants.find(v=>v.id===form.elements.variant.value),inBag=cart.find(i=>i.variant_id===variant?.id)?.quantity||0,limit=Math.max(0,Math.min(99,(variant?.on_hand||0)-inBag));form.elements.quantity.max=String(limit||1);form.querySelector('#variant-stock').textContent=limit?`${limit} unidade(s) disponível(is) para adicionar.`:'Esta variação já está toda na sua sacola ou está esgotada.';form.querySelector('[type=submit]').disabled=limit<1;form.querySelectorAll('[data-variant]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.variant===variant?.id)))};
+  refreshProductChoice=()=>{if(productViewCurrent(product.id,version))update()};
+  form.elements.variant.onchange=()=>{feedback('');update()};form.querySelectorAll('[data-variant]').forEach(button=>button.onclick=()=>{form.elements.variant.value=button.dataset.variant;feedback('');update()});update();
+  form.querySelector('.product-open-bag').onclick=openCart;
+  form.onsubmit=event=>{event.preventDefault();if(!productViewCurrent(product.id,version)||busy)return;if(pending){pendingNotice();return}const id=form.elements.variant.value,variant=variants.find(v=>v.id===id),quantity=Number(form.elements.quantity.value),existing=cart.find(item=>item.variant_id===id);if(!variant||!activeVariant(variant)||!Number.isInteger(quantity)||quantity<1||quantity+(existing?.quantity||0)>Math.min(99,variant.on_hand)){feedback('Escolha uma quantidade disponível.');return}if(existing)existing.quantity+=quantity;else cart.push({variant_id:id,quantity});saveCart();feedback('');form.querySelector('.product-added').hidden=false;alert(`${product.name} foi adicionada à sacola.`);update()};
+}
+async function loadRelatedProducts(product,version){
+  let memberships=[];
+  try{if(typeof api.getProductCollections==='function')memberships=await api.getProductCollections(store.id,product.id);else if(activeCollection?.product_ids?.includes(product.id))memberships=[activeCollection]}catch{return}
+  if(!productViewCurrent(product.id,version))return;
+  const groups=(Array.isArray(memberships)?memberships:[]).filter(group=>group&&group.active!==false&&(!group.store_id||group.store_id===store.id)&&Array.isArray(group.product_ids)&&group.product_ids.includes(product.id));
+  groups.sort((a,b)=>Number(b.slug===activeCollection?.slug)-Number(a.slug===activeCollection?.slug));
+  const candidates=new Map(products.filter(item=>item.id!==product.id&&item.active!==false&&(!item.store_id||item.store_id===store.id)).map(item=>[item.id,item]));
+  const related=[...new Set(groups.flatMap(group=>group.product_ids))].map(id=>candidates.get(id)).filter(Boolean).slice(0,4);
+  if(!related.length)return;
+  const section=mount.querySelector('.product-related-section');section.hidden=false;section.querySelector('.product-related-grid').innerHTML=renderProductCards(related);section.querySelectorAll('[data-product]').forEach(button=>button.onclick=()=>openProduct(button.dataset.product));section.querySelector('.product-collection-links').innerHTML=groups.slice(0,3).map(group=>`<a href="loja.html?loja=${encodeURIComponent(store.slug)}&amp;colecao=${encodeURIComponent(group.slug)}">${esc(group.name)} ↗</a>`).join('');bindProductImages(section);
+}
+function reviewDate(value){const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):''}
+async function loadProductReviews(product,version){
+  const target=mount.querySelector('.product-reviews-content');if(!target)return;
+  try{
+    if(typeof api.getProductReviews!=='function'){target.innerHTML='<p>As avaliações estarão disponíveis em breve.</p>';return}
+    const result=await api.getProductReviews(store.id,product.id);if(!productViewCurrent(product.id,version))return;
+    if(result?.available===false){target.innerHTML='<p>As avaliações estarão disponíveis em breve.</p>';return}
+    const rows=(Array.isArray(result?.reviews)?result.reviews:[]).filter(row=>row&&Number.isInteger(row.rating)&&row.rating>=1&&row.rating<=5);
+    const total=Number.isSafeInteger(Number(result?.summary?.count))&&Number(result.summary.count)>=0?Number(result.summary.count):rows.length;
+    const rawAverage=Number(result?.summary?.average),average=total&&Number.isFinite(rawAverage)&&rawAverage>=1&&rawAverage<=5?rawAverage:rows.length?rows.reduce((sum,row)=>sum+row.rating,0)/rows.length:0;
+    const score=average.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+    const ratingLink=mount.querySelector('.product-rating-link');if(total){ratingLink.hidden=false;ratingLink.textContent=`${score} / 5 · ${total} ${total===1?'avaliação':'avaliações'}`}
+    target.innerHTML=`<div class="product-reviews-layout"><aside class="product-review-score"><strong>${total?esc(score):'—'}</strong><span>${total?'de 5':'Ainda sem nota'}</span><p>${total?`${total} ${total===1?'avaliação':'avaliações'} de compradores`:'Seja a primeira pessoa a contar como foi.'}</p></aside><div class="product-review-list">${rows.length?rows.map(row=>`<article class="product-review"><div class="product-review-meta"><span class="review-rating" aria-label="Nota ${row.rating} de 5">${row.rating} / 5</span><time class="review-date">${esc(reviewDate(row.created_at))}</time></div>${row.title?`<h3 class="review-title">${esc(row.title)}</h3>`:''}<p class="review-body">${esc(row.body||'')}</p><div class="review-author">${esc(row.author_name||'Comprador')} <small class="review-verified">Compra verificada</small></div></article>`).join(''):'<p class="product-review-empty">As primeiras histórias com essa peça começam aqui.</p>'}</div></div>`;
+  }catch(error){if(productViewCurrent(product.id,version))target.innerHTML=`<p role="status">Não foi possível carregar as avaliações. <button type="button" class="product-review-retry">Tentar novamente</button></p>`;target.querySelector('.product-review-retry')?.addEventListener('click',()=>loadProductReviews(product,version))}
+}
+async function loadProductReviewContext(product,version){
+  const contextVersion=++reviewContextVersion,authEpoch=reviewAuthEpoch,target=mount.querySelector('.product-review-context');if(!target)return;
+  const current=()=>productViewCurrent(product.id,version)&&contextVersion===reviewContextVersion&&authEpoch===reviewAuthEpoch;
+  target.innerHTML='<p class="product-review-context-status" role="status">Conferindo sua conta…</p>';
+  try{
+    const user=await api.authUser();if(!current())return;reviewUserId=user?.id||null;
+    if(!user){target.innerHTML='<div class="review-context-box"><h3>Já tem essa peça?</h3><p>Entre na sua conta Camizetas para avaliar um produto de um pedido concluído.</p><a href="painel.html?compras=1">Entrar na minha conta ↗</a></div>';return}
+    if(typeof api.getProductReviewContext!=='function'){target.innerHTML='';return}
+    const context=await api.getProductReviewContext(product.id);if(!current())return;
+    const contextUser=await api.authUser();if(!current())return;if(contextUser?.id!==user.id){reviewContextVersion++;target.innerHTML='<p role="status">Sua conta mudou. Confira sua sessão antes de avaliar.</p>';return}
+    if(!context?.can_review){target.innerHTML=`<div class="review-context-box"><p>${esc(context?.reason||'Você poderá avaliar esta peça quando seu pedido estiver concluído.')}</p><a href="painel.html?compras=1">Acompanhar meus pedidos ↗</a></div>`;return}
+    const own=context.my_review||{};
+    target.innerHTML=`<div class="product-review-form"><div><p class="product-eyebrow">SUA EXPERIÊNCIA CONTA</p><h3>${own.id?'Atualize sua avaliação.':'Como foi vestir essa peça?'}</h3><p>Sua opinião aparece com o nome que você escolher abaixo.</p></div><form id="product-review-form"><label>Como você avalia esta peça?<select name="rating" required><option value="">Selecione uma nota</option>${[5,4,3,2,1].map(value=>`<option value="${value}" ${own.rating===value?'selected':''}>${value} / 5${value===5?' — Adorei':value===1?' — Não gostei':''}</option>`).join('')}</select></label><label>Nome público<input name="author_name" value="${esc(own.author_name||'')}" required minlength="2" maxlength="60" autocomplete="nickname" placeholder="Como você quer aparecer"></label><label>Título<input name="title" value="${esc(own.title||'')}" maxlength="120" placeholder="Resuma sua experiência"></label><label>Sua avaliação<textarea name="body" required minlength="20" maxlength="2000" rows="4" placeholder="Conte sobre o caimento, o tecido e os detalhes da peça.">${esc(own.body||'')}</textarea><small>De 20 a 2.000 caracteres.</small></label><button type="submit">${own.id?'Salvar avaliação':'Publicar minha avaliação'} ↗</button><p class="review-feedback" role="status"></p></form></div>`;
+    const form=target.querySelector('form'),userId=user.id;
+    form.onsubmit=async event=>{
+      event.preventDefault();if(!current()||form.getAttribute('aria-busy')==='true')return;
+      const feedback=form.querySelector('.review-feedback'),button=form.querySelector('[type=submit]');feedback.textContent='';feedback.classList.remove('error');form.setAttribute('aria-busy','true');button.disabled=true;
+      try{
+        const verifiedUser=await api.authUser();if(!current())return;if(verifiedUser?.id!==userId){reviewContextVersion++;target.innerHTML='<p role="status">Sua conta mudou. Confira sua sessão antes de avaliar.</p>';return}
+        const data=Object.fromEntries(new FormData(form)),rating=Number(data.rating),body=String(data.body||'').trim(),authorName=String(data.author_name||'').trim();
+        if(!Number.isInteger(rating)||rating<1||rating>5||body.length<20||body.length>2000||authorName.length<2||authorName.length>60)throw new Error('Escolha uma nota, um nome público e escreva uma avaliação de pelo menos 20 caracteres.');
+        await api.saveProductReview(product.id,{rating,title:String(data.title||'').trim(),body,author_name:authorName});
+        const responseUser=await api.authUser();if(!current()||responseUser?.id!==userId)return;
+        feedback.textContent='Sua avaliação foi salva. Obrigado por compartilhar.';button.textContent='Salvar avaliação ↗';loadProductReviews(product,version);
+      }catch(error){if(current()){feedback.textContent=error.message||'Não foi possível salvar sua avaliação.';feedback.classList.add('error')}}finally{if(current()){form.removeAttribute('aria-busy');button.disabled=false}}
+    };
+  }catch(error){if(current())target.innerHTML=`<p class="product-review-context-status" role="status">Não foi possível conferir sua permissão para avaliar. <button type="button" class="product-review-context-retry">Tentar novamente</button></p>`;target.querySelector('.product-review-context-retry')?.addEventListener('click',()=>loadProductReviewContext(product,version))}
+}
+
 function cartRows(){return cart.map(item=>{const found=itemVariant(item.variant_id);return {...item,...found}})}
 function validateCart(){if(!cart.length)return 'Sua sacola está vazia.';for(const row of cartRows()){if(!row.product||!row.variant||row.product.active===false||row.variant.active===false||row.quantity>row.variant.on_hand)return stockMessage}return ''}
 function openCart(){const rows=cartRows(),total=rows.reduce((n,row)=>n+(row.product?.price_cents||0)*row.quantity,0);const issue=validateCart();const dialog=openModal(`<h2>Sua sacola.</h2><p class="shop-modal-intro">${esc(store.name)} · ${cart.reduce((n,i)=>n+i.quantity,0)} peça(s)</p><div class="cart-lines">${rows.length?rows.map(row=>`<div class="shop-line-item"><img src="${esc(imageURL(row.product?.image_url))}" alt=""><div><h3>${esc(row.product?.name||'Produto indisponível')}</h3><p>${esc([row.variant?.size,row.variant?.color].filter(Boolean).join(' / '))}</p><strong>${money((row.product?.price_cents||0)*row.quantity)}</strong></div><div class="shop-line-controls"><button data-change="-1" data-id="${esc(row.variant_id)}" aria-label="Diminuir quantidade" ${pending?'disabled':''}>−</button><span>${row.quantity}</span><button data-change="1" data-id="${esc(row.variant_id)}" aria-label="Aumentar quantidade" ${pending||row.quantity>=(row.variant?.on_hand||0)||row.quantity>=99?'disabled':''}>+</button><button class="line-remove" data-remove="${esc(row.variant_id)}" ${pending?'disabled':''}>Remover</button></div></div>`).join(''):'<p class="shop-modal-intro">Escolha as peças que combinam com você.</p>'}</div>${rows.length?`<div class="cart-summary"><span>Produtos</span><span>${money(total)}</span></div><p class="checkout-hint">O envio deste pedido não realiza cobrança. Pagamento e entrega serão combinados com a loja; frete não está incluído neste total.</p><button class="cz-button" id="start-checkout" ${issue&&!pending?'disabled':''}>${pending?'Retomar envio do pedido':'Continuar para o pedido'} ↗</button>`:''}<p class="message ${issue?'error':''}" role="status">${esc(pending?'Um envio anterior está sem confirmação. Vamos repetir a mesma solicitação com segurança.':issue)}</p>`);dialog.querySelectorAll('[data-change]').forEach(b=>b.onclick=()=>{if(pending)return;const item=cart.find(i=>i.variant_id===b.dataset.id);const variant=itemVariant(b.dataset.id)?.variant;const next=item.quantity+Number(b.dataset.change);if(next<1)cart=cart.filter(i=>i!==item);else if(variant&&next<=Math.min(99,variant.on_hand))item.quantity=next;saveCart();openCart()});dialog.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{if(pending)return;cart=cart.filter(i=>i.variant_id!==b.dataset.remove);saveCart();openCart()});dialog.querySelector('#start-checkout')?.addEventListener('click',()=>beginCheckout())}
@@ -108,6 +227,7 @@ async function boot(){
   if(!slug||!mount)return;
   const link=document.createElement('link');link.rel='stylesheet';link.href='lojas.css';document.head.append(link);
   const designCSS=document.createElement('link');designCSS.rel='stylesheet';designCSS.href='store-design.css';document.head.append(designCSS);
+  const productCSS=document.createElement('link');productCSS.rel='stylesheet';productCSS.href='product-page.css';document.head.append(productCSS);
   document.body.classList.add('live-store-page');
   const bar=document.querySelector('.demo-bar');if(bar)bar.innerHTML='<a href="lojas.html">← Explorar lojas</a><span class="demo-label">CAMIZETAS · MARCAS INDEPENDENTES</span><a href="painel.html?compras=1">Meus pedidos ↗</a>';
   mount.innerHTML='<div class="shop-loading" role="status">Preparando a loja…</div>';
@@ -124,5 +244,11 @@ async function boot(){
     if(pending)alert('Há um envio de pedido sem confirmação. Abra sua sacola para retomá-lo com segurança.');
   }catch(error){mount.innerHTML=`<div class="shop-loading">${esc(error.message||'Não foi possível abrir esta loja.')} <a href="lojas.html">Voltar às lojas</a>.</div>`}
 }
-if(slug&&mount&&api.ready&&typeof api.onAuthChange==='function')api.onAuthChange(()=>setTimeout(refreshOwnerBar,0));
+window.addEventListener('popstate',()=>{if(!store)return;closeProductModal();render()});
+if(slug&&mount&&api.ready&&typeof api.onAuthChange==='function')api.onAuthChange(()=>{
+  setTimeout(refreshOwnerBar,0);reviewAuthEpoch++;reviewContextVersion++;reviewUserId=null;
+  const target=mount.querySelector('.product-review-context');if(target)target.innerHTML='<p role="status">Atualizando sua sessão…</p>';
+  const productId=new URLSearchParams(location.search).get('produto'),product=products.find(item=>item.id===productId);
+  if(product&&store?.reviews_enabled===true)loadProductReviewContext(product,productViewVersion);
+});
 boot();

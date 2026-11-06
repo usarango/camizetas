@@ -26,7 +26,7 @@ with check (
   and name ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp)$'
   and exists (
     select 1 from public.stores s
-    where s.id::text = (storage.foldername(name))[1]
+    where s.id::text = (storage.foldername(storage.objects.name))[1]
       and s.owner_id = (select auth.uid())
   )
 );
@@ -37,7 +37,7 @@ using (
   bucket_id = 'camizetas-products'
   and exists (
     select 1 from public.stores s
-    where s.id::text = (storage.foldername(name))[1]
+    where s.id::text = (storage.foldername(storage.objects.name))[1]
       and s.owner_id = (select auth.uid())
   )
 );

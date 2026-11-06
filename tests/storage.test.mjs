@@ -33,9 +33,9 @@ before(async () => {
     create role authenticated nologin;
     create schema auth;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid; $$;
-    create table public.stores(id uuid primary key,owner_id uuid not null,published boolean not null default false);
+    create table public.stores(id uuid primary key,owner_id uuid not null,name text not null default 'Scatablanga',published boolean not null default false);
     alter table public.stores enable row level security;
-    create policy stores_owner_read on public.stores for select to authenticated using(owner_id=(select auth.uid()));
+    create policy stores_owner_read on public.stores for select to authenticated using(published or owner_id=(select auth.uid()));
     grant usage on schema public,auth to anon,authenticated;
     grant select on public.stores to authenticated;
     create schema storage;
@@ -51,6 +51,7 @@ before(async () => {
     insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('unrelated-bucket','unrelated-bucket',false,123,array['text/plain']);
   `);
   await db.query('insert into public.stores(id,owner_id) values($1,$2),($3,$4)', [store,owner,otherStore,otherOwner]);
+  await db.query('update public.stores set published=true where id=$1', [store]);
   await db.exec(await readFile(new URL('../database/storage.sql', import.meta.url), 'utf8'));
 });
 after(async () => { if (db) await db.close(); });
@@ -93,4 +94,23 @@ test('object replacement has no UPDATE policy and only the store owner may delet
   assert.equal(wrongDelete.rows.length, 0);
   const rightDelete = await asUser(owner, () => db.query('delete from storage.objects where name=$1 returning name', [name]));
   assert.equal(rightDelete.rows.length, 1);
+});
+
+test('repair fixes historical policies without changing stored objects or granting another store access', async () => {
+  await db.exec('drop policy camizetas_products_read on storage.objects; drop policy camizetas_products_owner_insert on storage.objects; drop policy camizetas_products_owner_delete on storage.objects;');
+  await db.exec(await readFile(new URL('../supabase/migrations/20261105191718_camizetas_product_images.sql', import.meta.url), 'utf8'));
+  const existing = `${store}/40000000-0000-4000-8000-000000000001.png`;
+  const incoming = `${store}/40000000-0000-4000-8000-000000000002.png`;
+  await insert(existing);
+  await assert.rejects(asUser(owner, () => insert(incoming)), /row-level security/);
+  const fix = await readFile(new URL('../database/fix-product-image-storage.sql', import.meta.url), 'utf8');
+  await db.exec(fix);
+  await db.exec(fix);
+  assert.equal((await db.query('select name from storage.objects where name=$1', [existing])).rows.length, 1);
+  assert.equal((await asUser(owner, () => insert(incoming))).rows[0].name, incoming);
+  await assert.rejects(asUser(otherOwner, () => insert(`${store}/40000000-0000-4000-8000-000000000003.png`)), /row-level security/);
+  await assert.rejects(asUser(owner, () => insert(`${store}/${object}.svg`)), /row-level security/);
+  await assert.rejects(asUser(owner, () => insert(`${store}/${object}.png`, 'unrelated-bucket')), /row-level security/);
+  assert.equal((await asUser(otherOwner, () => db.query('delete from storage.objects where name=$1 returning name', [existing]))).rows.length, 0);
+  assert.equal((await asUser(owner, () => db.query('delete from storage.objects where name=$1 returning name', [existing]))).rows.length, 1);
 });

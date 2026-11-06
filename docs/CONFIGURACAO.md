@@ -6,7 +6,7 @@ O banco deve ser um projeto Supabase exclusivo da Camizetas, em organização Fr
 
 O projeto informado é `hbajyggnlsijqrwhsedn`. A conexão administrativa precisa estar autorizada para a organização desse projeto. Um link de projeto não concede acesso por si só.
 
-A URL e a chave publicável do projeto já estão configuradas em `.openai/app-public.json`. A API pública foi consultada: Auth está habilitado e `public.stores` ainda não está disponível.
+A URL e a chave publicável do projeto já estão configuradas em `.openai/app-public.json`. A operação existente usa Supabase Auth e as tabelas de lojas, catálogo, coleções, estoque e pedidos.
 
 Para preparar um projeto novo sem depender da conexão administrativa desta conversa, abra o [SQL Editor](https://supabase.com/dashboard/project/hbajyggnlsijqrwhsedn/sql/new), cole todo o conteúdo de [`database/setup.sql`](../database/setup.sql) e execute. Esse arquivo reúne as duas migrações em uma transação, sem apagar dados. Execute uma única vez; tabelas com os mesmos nomes fazem a operação ser revertida.
 
@@ -69,3 +69,13 @@ Execute somente [`database/collections.sql`](../database/collections.sql) no SQL
 Em **Painel → Coleções**, defina nome, endereço, descrição, capa e produtos. Marque publicação e, se quiser, destaque na vitrine; a loja também precisa estar publicada. Coleções não destacadas continuam acessíveis pelo filtro da loja e por seu link individual. Em **Espaço criativo → Seções**, escolha se a área de destaque aparece e sua posição.
 
 A mesma peça pode participar de mais de uma coleção; estoque e preço continuam no produto original. Publicar, despublicar e reorganizar coleções não cria movimentações de estoque.
+
+## Atualização das páginas de produto
+
+Em um projeto existente com as atualizações anteriores aplicadas, execute somente [`database/product-pages.sql`](../database/product-pages.sql). A atualização adiciona a galeria e as avaliações e mantém produtos, variantes, estoque, pedidos e coleções. Não repita `setup.sql`.
+
+No cadastro do produto, adicione até dez fotos, escolha a capa e organize a sequência. Fotos novas só são enviadas ao salvar. Cada arquivo aceita JPG, PNG ou WebP de até 5 MB; também é possível usar links HTTPS. A imagem de capa existente continua funcionando.
+
+Em **Sua loja**, a opção **Avaliações de produtos** começa desligada. Quando ativada, clientes com pedido concluído podem avaliar os produtos comprados ou editar sua própria avaliação. O banco confirma a compra e a conta; esses dados não são aceitos do navegador. Desativar a opção oculta as avaliações da vitrine sem apagá-las. O nome público é informado no formulário; o e-mail do cliente não é publicado.
+
+A página de produto abre por `loja.html?loja=ENDERECO&produto=ID`. Sugestões usam somente produtos ativos das coleções publicadas que contêm a peça. O pedido continua sem cobrança automática ou cálculo de frete.

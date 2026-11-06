@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test --test-isolation=none tests/*.test.mjs",
-    "check": "node --check src/data.js && node --check src/painel.js && node --check src/storefront.js && node --check src/shops.js && node --check src/design.js && node --check src/store-layout.js && node --check src/customizer.js && node --check src/landing-creative.js",
+    "check": "node --check src/data.js && node --check src/painel.js && node --check src/storefront.js && node --check src/product-page.js && node --check src/shops.js && node --check src/design.js && node --check src/store-layout.js && node --check src/customizer.js && node --check src/landing-creative.js",
     "db:prepare": "node scripts/prepare-database.mjs"
   },
   "dependencies": {

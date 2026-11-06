@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {renderStoreShell, renderProductCards} from '../src/store-layout.js';
 import {normalizeDesign, resolveDesign, PRESETS} from '../src/design.js';
 import * as designTokens from '../src/design.js';
+import * as productPageTokens from '../src/product-page.js';
 
 const source=name=>fs.readFileSync(new URL(`../${name}`,import.meta.url),'utf8');
 const browserSource=name=>source(name).replace(/^import\s[\s\S]*?;\s*$/gm,'');
@@ -16,9 +17,9 @@ const products=[{id:'p1',name:'Camiseta <b>Linda</b>',description:'A peça',pric
 const customer={name:'Nome privado da compradora',phone:'11999999999',address:{postal_code:'01001000',state:'SP',street:'Rua privada da compradora',number:'1',complement:'',neighborhood:'Centro',city:'São Paulo'},notes:'Observação privada'};
 const pendingFor=(userId='buyer-a')=>({key:'existing-key',userId,items:[{variant_id:'v1',quantity:1}],customer});
 
-function makeWindow(url,html,api){const window=new Window({url,settings:{disableCSSFileLoading:true,disableJavaScriptFileLoading:true,disableComputedStyleRendering:true}});window.document.write(html);window.HTMLDialogElement.prototype.showModal=function(){this.open=true};window.HTMLDialogElement.prototype.close=function(){this.open=false};Object.assign(window,{...designTokens,api,escapeHTML,esc:escapeHTML,money,renderStoreShell,renderProductCards,normalizeDesign,resolveDesign,PRESETS});return window}
+function makeWindow(url,html,api){const window=new Window({url,settings:{disableCSSFileLoading:true,disableJavaScriptFileLoading:true,disableComputedStyleRendering:true}});window.document.write(html);window.HTMLDialogElement.prototype.showModal=function(){this.open=true};window.HTMLDialogElement.prototype.close=function(){this.open=false};Object.assign(window,{...designTokens,...productPageTokens,api,escapeHTML,esc:escapeHTML,money,renderStoreShell,renderProductCards,normalizeDesign,resolveDesign,PRESETS});return window}
 async function cleanup(window){await window.happyDOM.abort();window.close()}
-async function storefront(options={}){let session=options.user===undefined?{id:'buyer-a'}:options.user;const authCallbacks=new Set();const emitAuth=(event,user)=>{for(const callback of authCallbacks)callback(event,user)};const calls=[],collectionCalls=[];const api={ready:true,getPublicStore:async()=>options.store||store,getPublicProducts:async()=>options.products||products,getManagedStore:async()=>session&&options.managedStore?.owner_id===session.id?options.managedStore:null,authUser:async()=>session,onAuthChange:callback=>{authCallbacks.add(callback);return()=>authCallbacks.delete(callback)},signOut:async()=>{session=null;emitAuth('SIGNED_OUT',null)},signIn:async()=>{session={id:'buyer-a'};emitAuth('SIGNED_IN',session)},signUp:async()=>({needsConfirmation:true}),placeOrder:async(...args)=>{calls.push(args);if(options.placeOrder)return options.placeOrder(...args);return {id:'o1',order_number:42,total_cents:8990}}};if(!options.legacyCollectionsAPI){api.getPublicCollections=async()=>options.collections||[];api.getPublicCollection=async(storeId,collectionSlug)=>{collectionCalls.push([storeId,collectionSlug]);return typeof options.getPublicCollection==='function'?options.getPublicCollection(storeId,collectionSlug):options.collection||null}}const url='https://camizetas.test/loja.html?loja=atelier'+(options.collectionRoute===undefined?'':'&colecao='+encodeURIComponent(options.collectionRoute))+(options.search||'');const window=makeWindow(url,'<div class="demo-bar"></div><main id="standalone-store"></main>',api);const navigations=[];window.location.assign=value=>navigations.push(String(value));if(options.cart||options.pending)window.localStorage.setItem('cz-cart:s1',JSON.stringify(options.cart||[{variant_id:'v1',quantity:1}]));if(options.pending)window.sessionStorage.setItem('cz-checkout:s1',JSON.stringify(options.pending));window.eval(browserSource('src/storefront.js'));await tick();await tick();return {window,document:window.document,calls,collectionCalls,navigations,setUser(user,emit=false){session=user;if(emit)emitAuth(user?'SIGNED_IN':'SIGNED_OUT',user)}}}
+async function storefront(options={}){let session=options.user===undefined?{id:'buyer-a'}:options.user;const authCallbacks=new Set();const emitAuth=(event,user)=>{for(const callback of authCallbacks)callback(event,user)};const calls=[],collectionCalls=[];const api={ready:true,getPublicStore:async()=>options.store||store,getPublicProducts:async()=>options.products||products,getManagedStore:async()=>session&&options.managedStore?.owner_id===session.id?options.managedStore:null,authUser:async()=>session,onAuthChange:callback=>{authCallbacks.add(callback);return()=>authCallbacks.delete(callback)},signOut:async()=>{session=null;emitAuth('SIGNED_OUT',null)},signIn:async()=>{session={id:'buyer-a'};emitAuth('SIGNED_IN',session)},signUp:async()=>({needsConfirmation:true}),placeOrder:async(...args)=>{calls.push(args);if(options.placeOrder)return options.placeOrder(...args);return {id:'o1',order_number:42,total_cents:8990}}};if(!options.legacyCollectionsAPI){api.getPublicCollections=async()=>options.collections||[];api.getPublicCollection=async(storeId,collectionSlug)=>{collectionCalls.push([storeId,collectionSlug]);return typeof options.getPublicCollection==='function'?options.getPublicCollection(storeId,collectionSlug):options.collection||null}}Object.assign(api,options.api||{});const url='https://camizetas.test/loja.html?loja=atelier'+(options.collectionRoute===undefined?'':'&colecao='+encodeURIComponent(options.collectionRoute))+(options.search||'');const window=makeWindow(url,'<div class="demo-bar"></div><main id="standalone-store"></main>',api);const navigations=[];window.location.assign=value=>navigations.push(String(value));if(options.cart||options.pending)window.localStorage.setItem('cz-cart:s1',JSON.stringify(options.cart||[{variant_id:'v1',quantity:1}]));if(options.pending)window.sessionStorage.setItem('cz-checkout:s1',JSON.stringify(options.pending));window.eval(browserSource('src/storefront.js'));await tick();await tick();return {window,document:window.document,calls,collectionCalls,navigations,setUser(user,emit=false){session=user;if(emit)emitAuth(user?'SIGNED_IN':'SIGNED_OUT',user)}}}
 async function openCheckout(h){h.document.querySelector('.shop-bag-button').click();h.document.querySelector('#start-checkout').click();await tick();await tick();return h.document.querySelector('#checkout-form')}
 function fillCustomer(form,window){for(const[key,value]of Object.entries({name:customer.name,phone:customer.phone,...customer.address,notes:customer.notes}))if(form.elements[key])form.elements[key].value=value}
 const submit=(form,window)=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
@@ -218,4 +219,78 @@ test('post-order refresh does not expose full catalogue if active collection bec
     const form=await openCheckout(h);fillCustomer(form,h.window);submit(form,h.window);await tick();await tick();await tick();
     assert.equal(h.calls.length,1);assert.ok(collectionReads>=2);assert.match(h.document.querySelector('#standalone-store').textContent,/coleção não está disponível/i);assert.equal(h.document.querySelectorAll('.shop-product-card').length,0);assert.match(h.document.querySelector('.order-success-number').textContent,/#42/);
   }finally{await cleanup(h.window)}
+});
+
+test('products open as full pages with safe shareable URLs, gallery and cart limits',async()=>{
+  const product={...products[0],image_url:'https://example.test/front.jpg',image_urls:['https://example.test/front.jpg','https://example.test/back.jpg','javascript:alert(1)','https://example.test/detail.jpg']};
+  const h=await storefront({products:[product],search:'&utm_source=lookbook&code=private-auth-code'});
+  try{
+    h.document.querySelector('[data-product]').click();
+    assert.ok(h.document.querySelector('.product-page'));assert.equal(h.document.querySelector('.shop-modal'),null);
+    assert.equal(new URL(h.window.location.href).searchParams.get('produto'),'p1');assert.equal(new URL(h.window.location.href).searchParams.get('utm_source'),'lookbook');assert.equal(new URL(h.window.location.href).searchParams.has('code'),false);
+    assert.equal(h.document.querySelector('#product-title').textContent,product.name);
+    assert.equal(h.document.querySelectorAll('[data-photo]').length,3);assert.match(h.document.querySelector('.product-main-image').src,/front.jpg$/);
+    h.document.querySelector('[data-photo="1"]').click();assert.match(h.document.querySelector('.product-main-image').src,/back.jpg$/);assert.equal(h.document.querySelector('[data-photo="1"]').getAttribute('aria-pressed'),'true');
+    h.document.querySelector('.product-gallery-next').click();assert.match(h.document.querySelector('.product-main-image').src,/detail.jpg$/);
+    h.document.querySelector('.product-zoom-trigger').click();assert.ok(h.document.querySelector('.product-lightbox[open]'));h.document.querySelector('.product-lightbox').dispatchEvent(new h.window.KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));assert.match(h.document.querySelector('.product-lightbox-image').src,/back.jpg$/);h.document.querySelector('.product-lightbox-close').click();
+    const form=h.document.querySelector('#product-choice');form.elements.quantity.value='3';submit(form,h.window);assert.equal(h.document.querySelector('.shop-bag-count').textContent,'3');assert.equal(form.querySelector('[type=submit]').disabled,true);assert.equal(h.document.querySelector('.product-added').hidden,false);
+    submit(form,h.window);assert.equal(JSON.parse(h.window.localStorage.getItem('cz-cart:s1'))[0].quantity,3);
+    h.document.querySelector('.product-breadcrumb [data-product-back]').click();assert.ok(h.document.querySelector('.shop-product-grid'));assert.equal(new URL(h.window.location.href).searchParams.has('produto'),false);assert.equal(h.document.querySelector('.shop-bag-count').textContent,'3');
+    h.window.history.pushState({},'','loja.html?loja=atelier&produto=p1');h.window.dispatchEvent(new h.window.PopStateEvent('popstate'));assert.ok(h.document.querySelector('.product-page'));assert.equal(h.document.querySelector('#product-title').textContent,product.name);
+  }finally{await cleanup(h.window)}
+});
+
+test('direct product links preserve collection context and reject unavailable or foreign products',async()=>{
+  const h=await storefront({collectionRoute:'verao',collection:publicCollection,search:'&produto=p1'});
+  try{assert.ok(h.document.querySelector('.product-page'));assert.equal(h.document.querySelector('.product-breadcrumb a').getAttribute('href'),'/loja.html?loja=atelier&colecao=verao');assert.match(h.document.title,/Camiseta/);assert.match(h.document.querySelector('.product-main-image').src,/product-placeholder.svg$/)}finally{await cleanup(h.window)}
+  for(const product of [null,{...products[0],active:false},{...products[0],store_id:'foreign-store'}]){
+    const unavailable=await storefront({products:product?[product]:[],search:'&produto=p1'});
+    try{assert.match(unavailable.document.querySelector('.product-unavailable').textContent,/não está na vitrine/);assert.equal(unavailable.document.querySelector('#product-choice'),null);assert.equal(unavailable.document.querySelector('.shop-product-grid'),null)}finally{await cleanup(unavailable.window)}
+  }
+});
+
+test('product page suggestions include only other active products in a shared active collection',async()=>{
+  const third={...otherProduct,id:'p3',name:'Produto sem coleção em comum'},inactive={...otherProduct,id:'p4',active:false},foreign={...otherProduct,id:'p5',store_id:'another-store'};
+  const h=await storefront({products:[...products,otherProduct,third,inactive,foreign],search:'&produto=p1',api:{getProductCollections:async()=>[{...publicCollection,product_ids:['p1','p2','p2','p4','p5']},{...publicCollection,id:'c2',slug:'sem-vinculo',product_ids:['p3']},{...publicCollection,id:'c3',active:false,product_ids:['p1','p3']}]}});
+  try{await tick();assert.equal(h.document.querySelector('.product-related-section').hidden,false);assert.equal(h.document.querySelectorAll('.product-related-grid .shop-product-card').length,1);assert.equal(h.document.querySelector('.product-related-grid h3').textContent,otherProduct.name);h.document.querySelector('.product-related-grid [data-product]').click();assert.equal(h.document.querySelector('#product-title').textContent,otherProduct.name);assert.equal(new URL(h.window.location.href).searchParams.get('produto'),'p2')}finally{await cleanup(h.window)}
+  const unrelated=await storefront({products:[...products,otherProduct],search:'&produto=p1',api:{getProductCollections:async()=>[]}});
+  try{assert.equal(unrelated.document.querySelector('.product-related-section').hidden,true);assert.equal(unrelated.document.querySelector('.product-related-grid').children.length,0)}finally{await cleanup(unrelated.window)}
+});
+
+test('product pages inherit all eight merchant identities and keep cart products outside the viewed collection',async()=>{
+  for(const preset of PRESETS){
+    const h=await storefront({store:{...store,design:normalizeDesign({...preset.defaults,preset:preset.id})},products:[...products,otherProduct],cart:[{variant_id:'v3',quantity:2}],search:'&produto=p1'});
+    try{assert.equal(h.document.querySelector('.product-page').getAttribute('data-preset'),preset.id);assert.equal(h.document.querySelector('.product-page').style.getPropertyValue('--shop-accent'),preset.defaults.accent);h.document.querySelector('.shop-bag-button').click();assert.equal(h.document.querySelector('.shop-line-item h3').textContent,otherProduct.name);assert.equal(h.document.querySelector('#start-checkout').disabled,false)}finally{await cleanup(h.window)}
+  }
+});
+
+const review={id:'r1',author_name:'Maria <img onerror=alert(1)>',rating:5,title:'Caimento <b>perfeito</b>',body:'Adorei esta peça. O tecido é muito confortável.',created_at:'2026-11-01T10:00:00Z'};
+
+test('reviews are optional and display real safe ratings and verified buyer opinions',async()=>{
+  let calls=0;
+  const disabled=await storefront({search:'&produto=p1',api:{getProductReviews:async()=>{calls++;return {available:true,reviews:[review],summary:{count:1,average:5}}}}});
+  try{assert.equal(disabled.document.querySelector('.product-reviews-section'),null);assert.equal(calls,0)}finally{await cleanup(disabled.window)}
+  const h=await storefront({store:{...store,reviews_enabled:true},search:'&produto=p1',user:null,api:{getProductReviews:async()=>({available:true,reviews:[review],summary:{count:1,average:5}})}});
+  try{await tick();assert.equal(h.document.querySelector('.review-title').textContent,review.title);assert.ok(h.document.querySelector('.review-author').textContent.includes(review.author_name));assert.equal(h.document.querySelector('.product-reviews-section script,.product-reviews-section img[onerror]'),null);assert.match(h.document.querySelector('.product-rating-link').textContent,/5,0 \/ 5 · 1 avaliação/);assert.match(h.document.querySelector('.review-verified').textContent,/Compra verificada/);assert.equal(h.document.querySelector('#product-review-form'),null);assert.match(h.document.querySelector('.review-context-box').textContent,/Entre na sua conta/)}finally{await cleanup(h.window)}
+});
+
+test('verified buyer can publish and edit their own review without invoking checkout',async()=>{
+  const calls=[];
+  const h=await storefront({store:{...store,reviews_enabled:true},search:'&produto=p1',api:{getProductReviews:async()=>({available:true,reviews:[review],summary:{count:1,average:5}}),getProductReviewContext:async()=>({can_review:true,my_review:review}),saveProductReview:async(...args)=>calls.push(args)}});
+  try{await tick();const form=h.document.querySelector('#product-review-form');assert.ok(form);assert.equal(form.elements.author_name.value,review.author_name);form.elements.rating.value='4';form.elements.body.value='Ficou muito boa! O tecido é agradável e o corte é bonito.';submit(form,h.window);await tick();await tick();assert.equal(calls.length,1);assert.equal(calls[0][0],'p1');assert.equal(calls[0][1].rating,4);assert.equal(h.document.querySelector('#checkout-form'),null);assert.match(h.document.querySelector('.review-feedback').textContent,/foi salva/);assert.equal(h.calls.length,0)}finally{await cleanup(h.window)}
+});
+
+test('review permissions and stale product requests never leak across navigation or accounts',async()=>{
+  let resolveReviews;const delayed=new Promise(resolve=>{resolveReviews=resolve});
+  const h=await storefront({store:{...store,reviews_enabled:true},products:[...products,otherProduct],search:'&produto=p1',api:{getProductReviews:async(_store,id)=>id==='p1'?delayed:{available:true,reviews:[],summary:{count:0,average:null}},getProductReviewContext:async()=>({can_review:false,reason:'Você precisa de um pedido concluído.'})}});
+  try{await tick();assert.equal(h.document.querySelector('#product-review-form'),null);assert.match(h.document.querySelector('.review-context-box').textContent,/pedido concluído/);h.window.history.pushState({},'','loja.html?loja=atelier&produto=p2');h.window.dispatchEvent(new h.window.PopStateEvent('popstate'));resolveReviews({available:true,reviews:[review],summary:{count:1,average:5}});await tick();await tick();assert.equal(h.document.querySelector('#product-title').textContent,otherProduct.name);assert.equal(h.document.querySelector('.review-title'),null)}finally{await cleanup(h.window)}
+  let release;const pendingContext=new Promise(resolve=>{release=resolve});let reads=0;
+  const switched=await storefront({store:{...store,reviews_enabled:true},search:'&produto=p1',api:{getProductReviews:async()=>({available:true,reviews:[],summary:{count:0,average:null}}),getProductReviewContext:async()=>++reads===1?pendingContext:{can_review:false,reason:'Sem compra concluída.'}}});
+  try{switched.setUser({id:'buyer-b'},true);release({can_review:true,my_review:review});await tick();await tick();assert.equal(switched.document.querySelector('#product-review-form'),null);assert.equal(switched.document.querySelector('.product-review-context').textContent.includes(review.body),false)}finally{await cleanup(switched.window)}
+});
+
+test('account changes immediately hide a review draft and prevent its stale form from saving',async()=>{
+  const calls=[];
+  const h=await storefront({store:{...store,reviews_enabled:true},search:'&produto=p1',api:{getProductReviews:async()=>({available:true,reviews:[],summary:{count:0,average:null}}),getProductReviewContext:async()=>({can_review:true,my_review:null}),saveProductReview:async(...args)=>calls.push(args)}});
+  try{await tick();const form=h.document.querySelector('#product-review-form');form.elements.author_name.value='Nome privado';form.elements.body.value='Esta avaliação estava sendo escrita na conta original.';h.setUser(null,true);assert.equal(h.document.querySelector('#product-review-form'),null);assert.equal(h.document.body.textContent.includes('Nome privado'),false);submit(form,h.window);await tick();assert.equal(calls.length,0)}finally{await cleanup(h.window)}
 });
